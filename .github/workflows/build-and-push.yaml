@@ -1,0 +1,44 @@
+name: Build & Push GSD Remote Image
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGION: us-central1
+  REGISTRY: us-central1-docker.pkg.dev
+  REPOSITORY: demos-321800/agents
+  IMAGE: gsd-remote
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGISTRY }} --quiet
+
+      - name: Build and push
+        run: |
+          TAG="${{ env.REGISTRY }}/${{ env.REPOSITORY }}/${{ env.IMAGE }}"
+          docker build \
+            -t "${TAG}:latest" \
+            -t "${TAG}:${{ github.sha }}" \
+            .
+          docker push "${TAG}:latest"
+          docker push "${TAG}:${{ github.sha }}"
+
+      - name: Print image URI
+        run: |
+          echo "Image: ${{ env.REGISTRY }}/${{ env.REPOSITORY }}/${{ env.IMAGE }}:${{ github.sha }}"

@@ -1,0 +1,7 @@
+auth.json
+*.key
+*.pem
+.env
+.gsd/
+.bg-shell/
+node_modules/

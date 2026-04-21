@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: gsd-agent
+  namespace: gsd-remote
+  labels:
+    app: gsd-agent
+spec:
+  serviceName: gsd-agent
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gsd-agent
+  template:
+    metadata:
+      labels:
+        app: gsd-agent
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: gsd
+          image: us-central1-docker.pkg.dev/demos-321800/agents/gsd-remote:latest
+          ports:
+            - containerPort: 3000
+              name: web
+          env:
+            - name: GSD_PORT
+              value: "3000"
+            - name: GSD_HOST
+              value: "0.0.0.0"
+            - name: NODE_ENV
+              value: "production"
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: gsd-home
+              mountPath: /home/gsd/.gsd
+            - name: gsd-auth
+              mountPath: /home/gsd/.gsd/agent/auth.json
+              subPath: auth.json
+              readOnly: true
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 60
+            periodSeconds: 30
+      volumes:
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: gsd-workspace
+        - name: gsd-home
+          persistentVolumeClaim:
+            claimName: gsd-home
+        - name: gsd-auth
+          secret:
+            secretName: gsd-auth

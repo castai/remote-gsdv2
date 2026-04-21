@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: gsd-agent
+  namespace: gsd-remote
+  labels:
+    app: gsd-agent
+spec:
+  type: ClusterIP
+  selector:
+    app: gsd-agent
+  ports:
+    - port: 3000
+      targetPort: 3000
+      name: web
