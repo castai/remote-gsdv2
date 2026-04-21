@@ -31,27 +31,13 @@ spec:
       containers:
         - name: gsd
           image: us-central1-docker.pkg.dev/demos-321800/agents/gsd-remote:latest
-          ports:
-            - containerPort: 3000
-              name: web
           env:
-            - name: GSD_PORT
-              value: "3000"
-            - name: GSD_HOST
-              value: "0.0.0.0"
-            - name: GSD_WEB_HOST
-              value: "0.0.0.0"
-            - name: GSD_WEB_PORT
-              value: "3000"
-            - name: GSD_WEB_ALLOWED_ORIGINS
-              value: "http://localhost:3000,http://127.0.0.1:3000,http://0.0.0.0:3000"
-            - name: GSD_WEB_AUTH_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: gsd-auth
-                  key: web-token
+            - name: WORKSPACE
+              value: "/workspace/dev_root/oc-salesanalyzer-control"
             - name: NODE_ENV
               value: "production"
+            - name: TERM
+              value: "xterm-256color"
           volumeMounts:
             - name: workspace
               mountPath: /workspace
@@ -68,17 +54,11 @@ spec:
             limits:
               cpu: "4"
               memory: 8Gi
-          readinessProbe:
-            httpGet:
-              path: /
-              port: 3000
-            initialDelaySeconds: 30
-            periodSeconds: 10
+          # Simple liveness: is the entrypoint still running?
           livenessProbe:
-            httpGet:
-              path: /
-              port: 3000
-            initialDelaySeconds: 60
+            exec:
+              command: ["tmux", "has-session", "-t", "gsd"]
+            initialDelaySeconds: 15
             periodSeconds: 30
       volumes:
         - name: workspace
