@@ -14,12 +14,14 @@ NAMESPACE="${GSD_NAMESPACE:-gsd-remote}"
 PROJECT=""
 TUNNEL_NAME="${GSD_TUNNEL_NAME:-gsd-remote}"
 VSCODE_MODE=false
+ITERM_MODE=false
 SESSION_NAME=""
 
 # ── Parse args ───────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --vscode) VSCODE_MODE=true; shift ;;
+    --iterm) ITERM_MODE=true; shift ;;
     --project|-p) PROJECT="$2"; shift 2 ;;
     --namespace|-n) NAMESPACE="$2"; shift 2 ;;
     --help|-h)
@@ -29,6 +31,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --project, -p <name>  Connect to a specific project (e.g. salesanalyzer)"
       echo "  --namespace, -n <ns>  K8s namespace (default: gsd-remote)"
       echo "  --vscode              Start a VS Code tunnel before attaching tmux"
+      echo "  --iterm               Use iTerm2 native tmux integration (tmux -CC)"
       echo ""
       echo "If multiple GSD pods are running, you'll be prompted to pick one."
       exit 0
@@ -176,9 +179,16 @@ fi
 
 # ── Attach to tmux ──────────────────────────────────────────────────────────
 
+# Build the tmux attach command
+TMUX_CMD="tmux"
+if [ "${ITERM_MODE}" = true ]; then
+  TMUX_CMD="tmux -CC"
+  echo "  (iTerm2 native mode — windows appear as native tabs)"
+fi
+
 # Direct session name given
 if [ -n "${SESSION_NAME}" ]; then
-  exec kubectl exec -it -n "${NAMESPACE}" "${POD}" -- tmux attach -t "${SESSION_NAME}"
+  exec kubectl exec -it -n "${NAMESPACE}" "${POD}" -- ${TMUX_CMD} attach -t "${SESSION_NAME}"
 fi
 
 # List tmux sessions
@@ -198,7 +208,7 @@ if [ "${COUNT}" -eq 1 ]; then
   STATE=$(echo "${SESSIONS}" | cut -d'|' -f3)
   echo "→ ${NAME} (${STATE}) — detach: Ctrl+B, D"
   echo ""
-  exec kubectl exec -it -n "${NAMESPACE}" "${POD}" -- tmux attach -t "${NAME}"
+  exec kubectl exec -it -n "${NAMESPACE}" "${POD}" -- ${TMUX_CMD} attach -t "${NAME}"
 fi
 
 # Multiple → pick
@@ -221,4 +231,4 @@ fi
 SELECTED="${NAMES[$((CHOICE - 1))]}"
 echo "→ ${SELECTED} — detach: Ctrl+B, D"
 echo ""
-exec kubectl exec -it -n "${NAMESPACE}" "${POD}" -- tmux attach -t "${SELECTED}"
+exec kubectl exec -it -n "${NAMESPACE}" "${POD}" -- ${TMUX_CMD} attach -t "${SELECTED}"
