@@ -265,7 +265,7 @@ RUN echo 'set -s extended-keys on' > ~/.tmux.conf && \
     echo '# over kubectl exec. Requires terminal support (iTerm2, Kitty,' >> ~/.tmux.conf && \
     echo '# Alacritty, Windows Terminal, WezTerm all support it).' >> ~/.tmux.conf && \
     echo 'set -g set-clipboard on' >> ~/.tmux.conf && \
-    echo 'set -ga terminal-overrides ",xterm-256color:Ms=\\E]52;c;%p2%s\\7"' >> ~/.tmux.conf && \
+    echo 'set -ga terminal-overrides ",xterm-256color:Ms=\\E]52;c;%p2%s\\007"' >> ~/.tmux.conf && \
     echo '' >> ~/.tmux.conf && \
     echo '# Copy mode: vi keys, y copies to clipboard via OSC 52' >> ~/.tmux.conf && \
     echo 'setw -g mode-keys vi' >> ~/.tmux.conf && \
