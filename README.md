@@ -152,12 +152,19 @@ If your local project has a `.gsd` symlink (default GSD behavior), copy the real
 
 ```bash
 # From your local machine
-GSD_REAL=$(readlink -f /path/to/project/.gsd)
 POD=$(kubectl get pods -n gsd-remote -l gsd/project=<name> -o jsonpath='{.items[0].metadata.name}')
+
+# 1. Copy project .gsd (milestones, decisions, database)
+GSD_REAL=$(readlink -f /path/to/project/.gsd)
 kubectl cp "${GSD_REAL}/" gsd-remote/"${POD}":/workspace/<name>/.gsd/
+
+# 2. Copy skills, agents, and preferences into the pod's ~/.gsd
+kubectl cp ~/.gsd/agent/skills/ gsd-remote/"${POD}":/home/gsd/.gsd/agent/skills/
+kubectl cp ~/.gsd/agent/agents/ gsd-remote/"${POD}":/home/gsd/.gsd/agent/agents/
+kubectl cp ~/.gsd/preferences.md gsd-remote/"${POD}":/home/gsd/.gsd/preferences.md
 ```
 
-This gives you a real `.gsd/` directory (not a symlink) with all milestones, decisions, database, and activity logs — fully git-trackable.
+This gives you a real `.gsd/` directory (not a symlink) with all milestones, decisions, database, and activity logs — fully git-trackable. Skills and agents are also synced so GSD has the same capabilities as your local setup.
 
 ## What's in the Image
 
