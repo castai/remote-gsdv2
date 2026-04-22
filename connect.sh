@@ -138,7 +138,7 @@ if [ "${LIST_MODE}" = true ]; then
   echo ""
 
   SESSIONS=$(kubectl exec -n "${NAMESPACE}" "${POD}" -- \
-    tmux list-sessions -F '  #{session_name}  #{session_windows} window(s)  #{?session_attached,attached,detached}' 2>/dev/null || true)
+    tmux list-sessions -F '  #{session_name}  #{session_windows} window(s)  #{?session_attached,attached,detached}  (created #{session_created_string})' 2>/dev/null || true)
 
   if [ -n "${SESSIONS}" ]; then
     echo "  tmux sessions:"
