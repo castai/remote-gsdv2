@@ -5,187 +5,209 @@ set -euo pipefail
 # Connect to a remote GSD agent running in Kubernetes.
 #
 # Usage:
-#   ./connect.sh              # attach to tmux session
-#   ./connect.sh --vscode     # start VS Code tunnel, then attach tmux
-#   ./connect.sh <session>    # attach directly to named tmux session
-#
-# VS Code tunnel mode (--vscode):
-#   1. Starts `code tunnel` inside the pod (if not already running)
-#   2. Walks you through GitHub auth if this is the first time
-#   3. Prints the tunnel name for VS Code → Remote-Tunnels: Connect
-#   4. Then drops you into tmux as usual
+#   ./connect.sh                          # auto-discover, pick if multiple
+#   ./connect.sh --project salesanalyzer  # connect to specific project
+#   ./connect.sh --vscode                 # start VS Code tunnel + tmux
 # ─────────────────────────────────────────────────────────────────────────────
 
 NAMESPACE="${GSD_NAMESPACE:-gsd-remote}"
-POD="${GSD_POD:-gsd-agent-0}"
+PROJECT=""
 TUNNEL_NAME="${GSD_TUNNEL_NAME:-gsd-remote}"
 VSCODE_MODE=false
 SESSION_NAME=""
 
 # ── Parse args ───────────────────────────────────────────────────────────────
-for arg in "$@"; do
-  case "$arg" in
-    --vscode) VSCODE_MODE=true ;;
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --vscode) VSCODE_MODE=true; shift ;;
+    --project|-p) PROJECT="$2"; shift 2 ;;
+    --namespace|-n) NAMESPACE="$2"; shift 2 ;;
     --help|-h)
-      echo "Usage: ./connect.sh [--vscode] [session-name]"
+      echo "Usage: ./connect.sh [options] [tmux-session]"
       echo ""
-      echo "  --vscode    Start a VS Code tunnel before attaching tmux"
-      echo "  <session>   Attach directly to a named tmux session"
+      echo "Options:"
+      echo "  --project, -p <name>  Connect to a specific project (e.g. salesanalyzer)"
+      echo "  --namespace, -n <ns>  K8s namespace (default: gsd-remote)"
+      echo "  --vscode              Start a VS Code tunnel before attaching tmux"
       echo ""
-      echo "Environment:"
-      echo "  GSD_NAMESPACE    K8s namespace (default: gsd-remote)"
-      echo "  GSD_POD          Pod name (default: gsd-agent-0)"
-      echo "  GSD_TUNNEL_NAME  VS Code tunnel name (default: gsd-remote)"
+      echo "If multiple GSD pods are running, you'll be prompted to pick one."
       exit 0
       ;;
-    -*) echo "Unknown flag: $arg"; exit 1 ;;
-    *) SESSION_NAME="$arg" ;;
+    -*) echo "Unknown flag: $1"; exit 1 ;;
+    *) SESSION_NAME="$1"; shift ;;
   esac
 done
 
-# ── Preflight ────────────────────────────────────────────────────────────────
-if ! kubectl get pod "${POD}" -n "${NAMESPACE}" &>/dev/null; then
-  echo "✗ Pod ${POD} not found in namespace ${NAMESPACE}"
+# ── Find the pod ─────────────────────────────────────────────────────────────
+
+discover_pod() {
+  # Get all running GSD pods: name|project|age
+  local pods
+  pods=$(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=gsd-remote" \
+    --field-selector=status.phase=Running \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.metadata.labels.gsd\/project}{"|"}{.metadata.creationTimestamp}{"\n"}{end}' 2>/dev/null || true)
+
+  # Strip trailing empty line
+  pods=$(echo "${pods}" | sed '/^$/d')
+
+  if [ -z "${pods}" ]; then
+    echo "✗ No running GSD pods found in namespace ${NAMESPACE}"
+    echo ""
+    echo "  Deploy one with:"
+    echo "    helm install <release> ./chart/gsd-remote -f values.yaml"
+    exit 1
+  fi
+
+  local count
+  count=$(echo "${pods}" | wc -l | tr -d ' ')
+
+  if [ "${count}" -eq 1 ]; then
+    POD=$(echo "${pods}" | cut -d'|' -f1)
+    PROJECT=$(echo "${pods}" | cut -d'|' -f2)
+    echo "✓ Found: ${PROJECT} (${POD})"
+    return
+  fi
+
+  # Multiple pods — let user pick
   echo ""
-  echo "  Is the agent deployed?"
-  echo "  kubectl get pods -n ${NAMESPACE}"
-  exit 1
-fi
+  echo "┌─────────────────────────────────────────────────┐"
+  echo "│  GSD Remote Agents (${count} running)                 │"
+  echo "└─────────────────────────────────────────────────┘"
+  echo ""
 
-STATUS=$(kubectl get pod "${POD}" -n "${NAMESPACE}" -o jsonpath='{.status.phase}')
-if [ "${STATUS}" != "Running" ]; then
-  echo "✗ Pod ${POD} is ${STATUS} (not Running)"
-  exit 1
-fi
+  local idx=0
+  declare -g -a POD_LIST=()
+  declare -g -a PROJECT_LIST=()
 
-echo "✓ Pod ${POD} is running"
+  while IFS='|' read -r pname pproject pcreated; do
+    [ -z "${pname}" ] && continue
+    idx=$((idx + 1))
+    local age
+    age=$(echo "${pcreated}" | cut -d'T' -f1)
+    printf "  [%d]  %-24s  project: %s\n" "${idx}" "${pproject:-unknown}" "${pname}"
+    POD_LIST+=("${pname}")
+    PROJECT_LIST+=("${pproject}")
+  done <<< "${pods}"
+
+  echo ""
+  read -rp "  Select [1-${idx}]: " choice
+
+  if ! [[ "${choice}" =~ ^[0-9]+$ ]] || [ "${choice}" -lt 1 ] || [ "${choice}" -gt "${idx}" ]; then
+    echo "✗ Invalid selection"
+    exit 1
+  fi
+
+  POD="${POD_LIST[$((choice - 1))]}"
+  PROJECT="${PROJECT_LIST[$((choice - 1))]}"
+}
+
+if [ -n "${PROJECT}" ]; then
+  # Specific project requested
+  POD=$(kubectl get pods -n "${NAMESPACE}" -l "gsd/project=${PROJECT}" \
+    --field-selector=status.phase=Running \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+  if [ -z "${POD}" ]; then
+    echo "✗ No running pod for project '${PROJECT}' in namespace ${NAMESPACE}"
+    echo ""
+    echo "  Available:"
+    kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=gsd-remote" \
+      -o custom-columns='POD:.metadata.name,PROJECT:.metadata.labels.gsd\/project,STATUS:.status.phase' 2>&1
+    exit 1
+  fi
+  echo "✓ Found: ${PROJECT} (${POD})"
+else
+  discover_pod
+fi
 
 # ── VS Code tunnel ──────────────────────────────────────────────────────────
 if [ "${VSCODE_MODE}" = true ]; then
+  TUNNEL_NAME="${PROJECT:-gsd-remote}"
   echo ""
   echo "┌─────────────────────────────────────────────────┐"
   echo "│  VS Code Tunnel Setup                           │"
   echo "└─────────────────────────────────────────────────┘"
 
-  # Check if tunnel is already running
   TUNNEL_RUNNING=$(kubectl exec -n "${NAMESPACE}" "${POD}" -- \
     bash -c 'pgrep -f "code.*tunnel" >/dev/null 2>&1 && echo "yes" || echo "no"' 2>/dev/null || echo "no")
 
   if [ "${TUNNEL_RUNNING}" = "yes" ]; then
-    echo ""
-    echo "  ✓ VS Code tunnel is already running as '${TUNNEL_NAME}'"
-    echo ""
-    echo "  Connect from VS Code:"
-    echo "    Cmd+Shift+P → Remote-Tunnels: Connect to Tunnel → ${TUNNEL_NAME}"
-    echo "  Or open in browser:"
-    echo "    https://vscode.dev/tunnel/${TUNNEL_NAME}"
+    echo "  ✓ Tunnel already running as '${TUNNEL_NAME}'"
+    echo "  → Cmd+Shift+P → Remote-Tunnels: Connect → ${TUNNEL_NAME}"
+    echo "  → https://vscode.dev/tunnel/${TUNNEL_NAME}"
     echo ""
   else
+    echo "  Starting tunnel '${TUNNEL_NAME}'..."
     echo ""
-    echo "  Starting VS Code tunnel '${TUNNEL_NAME}'..."
-    echo "  This will open a GitHub authentication flow."
-    echo ""
-
-    # Run the tunnel interactively so the user can complete GitHub auth.
-    # The tunnel prints a GitHub device code URL — user needs to visit it.
-    # Once authenticated, we background the tunnel and continue to tmux.
     kubectl exec -it -n "${NAMESPACE}" "${POD}" -- \
       bash -c "
-        # Start tunnel in background, capture output to a file
         nohup code tunnel --name '${TUNNEL_NAME}' --accept-server-license-terms \
           > /tmp/vscode-tunnel.log 2>&1 &
         TUNNEL_PID=\$!
         echo \$TUNNEL_PID > /tmp/vscode-tunnel.pid
-
-        echo '  Waiting for tunnel to initialize...'
-        # Wait for either the auth URL or the ready message
+        echo '  Waiting for tunnel...'
         for i in \$(seq 1 30); do
           if grep -q 'https://github.com/login/device' /tmp/vscode-tunnel.log 2>/dev/null; then
             echo ''
-            echo '  ┌────────────────────────────────────────────────────┐'
-            echo '  │  GitHub Authentication Required                    │'
-            echo '  └────────────────────────────────────────────────────┘'
+            echo '  ╔════════════════════════════════════════════════╗'
+            echo '  ║  GitHub Authentication Required               ║'
+            echo '  ╚════════════════════════════════════════════════╝'
             grep -A2 'https://github.com/login/device' /tmp/vscode-tunnel.log
             echo ''
-            echo '  Open the URL above in your browser and enter the code.'
-            echo '  Waiting for authentication...'
-            echo ''
-            # Wait for tunnel to become ready after auth
+            echo '  Open the URL above and enter the code.'
+            echo '  Waiting for auth...'
             for j in \$(seq 1 120); do
-              if grep -q 'is connected' /tmp/vscode-tunnel.log 2>/dev/null || \
-                 grep -q 'Open this link' /tmp/vscode-tunnel.log 2>/dev/null; then
-                break
-              fi
+              if grep -q 'is connected' /tmp/vscode-tunnel.log 2>/dev/null; then break; fi
               sleep 2
             done
             break
           fi
-          if grep -q 'is connected' /tmp/vscode-tunnel.log 2>/dev/null || \
-             grep -q 'Open this link' /tmp/vscode-tunnel.log 2>/dev/null; then
-            break
-          fi
+          if grep -q 'is connected' /tmp/vscode-tunnel.log 2>/dev/null; then break; fi
           sleep 1
         done
-
         echo ''
-        echo '  ✓ VS Code tunnel is ready!'
-        echo ''
-        echo '  Connect from VS Code:'
-        echo '    Cmd+Shift+P → Remote-Tunnels: Connect to Tunnel → ${TUNNEL_NAME}'
-        echo '  Or open in browser:'
-        echo '    https://vscode.dev/tunnel/${TUNNEL_NAME}'
-        echo ''
-        echo '  Tunnel running in background (PID='\$TUNNEL_PID')'
+        echo '  ✓ Tunnel ready!'
+        echo '  → Cmd+Shift+P → Remote-Tunnels: Connect → ${TUNNEL_NAME}'
+        echo '  → https://vscode.dev/tunnel/${TUNNEL_NAME}'
       "
   fi
-
-  echo "  Continuing to tmux session..."
+  echo "  Continuing to tmux..."
   echo ""
 fi
 
-# ── Direct attach if session name given ──────────────────────────────────────
+# ── Attach to tmux ──────────────────────────────────────────────────────────
+
+# Direct session name given
 if [ -n "${SESSION_NAME}" ]; then
-  echo "→ Attaching to tmux session '${SESSION_NAME}'..."
   exec kubectl exec -it -n "${NAMESPACE}" "${POD}" -- tmux attach -t "${SESSION_NAME}"
 fi
 
-# ── List sessions ────────────────────────────────────────────────────────────
+# List tmux sessions
 SESSIONS=$(kubectl exec -n "${NAMESPACE}" "${POD}" -- \
-  tmux list-sessions -F '#{session_name}|#{session_windows}|#{session_created}|#{?session_attached,attached,detached}' 2>/dev/null || true)
+  tmux list-sessions -F '#{session_name}|#{session_windows}|#{?session_attached,attached,detached}' 2>/dev/null || true)
 
 if [ -z "${SESSIONS}" ]; then
-  echo "✗ No tmux sessions found on ${POD}"
-  echo ""
-  echo "  Start one with:"
-  echo "  kubectl exec -it -n ${NAMESPACE} ${POD} -- tmux new -s gsd -c /workspace 'gsd'"
-  exit 1
+  echo "  No tmux sessions — opening a shell..."
+  exec kubectl exec -it -n "${NAMESPACE}" "${POD}" -- zsh
 fi
 
 COUNT=$(echo "${SESSIONS}" | wc -l | tr -d ' ')
 
-# ── Single session → attach directly ─────────────────────────────────────────
+# Single session → attach
 if [ "${COUNT}" -eq 1 ]; then
   NAME=$(echo "${SESSIONS}" | cut -d'|' -f1)
-  STATE=$(echo "${SESSIONS}" | cut -d'|' -f4)
-  echo "→ One session found: ${NAME} (${STATE})"
-  echo "  Attaching... (detach: Ctrl+B, D)"
+  STATE=$(echo "${SESSIONS}" | cut -d'|' -f3)
+  echo "→ ${NAME} (${STATE}) — detach: Ctrl+B, D"
   echo ""
   exec kubectl exec -it -n "${NAMESPACE}" "${POD}" -- tmux attach -t "${NAME}"
 fi
 
-# ── Multiple sessions → pick one ─────────────────────────────────────────────
+# Multiple → pick
 echo ""
-echo "┌─────────────────────────────────────────────────┐"
-echo "│  GSD Remote Sessions on ${POD}                  │"
-echo "└─────────────────────────────────────────────────┘"
-echo ""
-
 IDX=0
 declare -a NAMES
-while IFS='|' read -r NAME WINDOWS CREATED STATE; do
+while IFS='|' read -r NAME WINDOWS STATE; do
   IDX=$((IDX + 1))
-  CREATED_FMT=$(date -r "${CREATED}" '+%H:%M:%S' 2>/dev/null || date -d "@${CREATED}" '+%H:%M:%S' 2>/dev/null || echo "${CREATED}")
-  printf "  [%d]  %-20s  %d window(s)  started %s  (%s)\n" "${IDX}" "${NAME}" "${WINDOWS}" "${CREATED_FMT}" "${STATE}"
+  printf "  [%d]  %-16s  %d window(s)  %s\n" "${IDX}" "${NAME}" "${WINDOWS}" "${STATE}"
   NAMES+=("${NAME}")
 done <<< "${SESSIONS}"
 
@@ -193,12 +215,10 @@ echo ""
 read -rp "  Select session [1-${IDX}]: " CHOICE
 
 if ! [[ "${CHOICE}" =~ ^[0-9]+$ ]] || [ "${CHOICE}" -lt 1 ] || [ "${CHOICE}" -gt "${IDX}" ]; then
-  echo "✗ Invalid selection"
-  exit 1
+  echo "✗ Invalid selection"; exit 1
 fi
 
 SELECTED="${NAMES[$((CHOICE - 1))]}"
-echo ""
-echo "→ Attaching to '${SELECTED}'... (detach: Ctrl+B, D)"
+echo "→ ${SELECTED} — detach: Ctrl+B, D"
 echo ""
 exec kubectl exec -it -n "${NAMESPACE}" "${POD}" -- tmux attach -t "${SELECTED}"
