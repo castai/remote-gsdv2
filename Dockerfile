@@ -3,12 +3,23 @@
 # Runs gsd-pi inside a tmux session. Attach via kubectl exec.
 #
 # Build:  docker build -t gsd-remote:latest .
-# Connect: ./connect.sh
+# Connect: ./connect.sh  (tmux)  or  VS Code Remote-SSH / Dev Containers
+#
+# Layer strategy (ordered by change frequency — rarest first):
+#   1. system    — apt packages, locale
+#   2. cloud     — kubectl, gh, gcloud, aws, docker, helm, terraform
+#   3. languages — Go, Rust
+#   4. lsp       — language servers, Go tools, Node tools
+#   5. gsd       — gsd-pi + Python tools
+#   6. user      — non-root user, oh-my-zsh, dotfiles, vscode server
+#   7. app       — entrypoint.sh + connect.sh (changes most, rebuilds in seconds)
 # ─────────────────────────────────────────────────────────────────────────────
 
 FROM node:22-slim AS base
 
-# ── Core system packages ─────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# LAYER 1: System packages (changes rarely)
+# ═══════════════════════════════════════════════════════════════════════════════
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Shell & terminal
     zsh \
@@ -43,8 +54,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # TLS & certs
     ca-certificates \
     openssl \
-    # SSH & remote
+    # SSH & remote access
     openssh-client \
+    openssh-server \
     rsync \
     # Editors
     vim \
@@ -77,61 +89,74 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sudo \
     man-db \
     shellcheck \
-    # Needed by some language servers
     libicu-dev \
   && rm -rf /var/lib/apt/lists/* \
-  && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
+  && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen \
+  && ln -sf /usr/bin/fd-find /usr/local/bin/fd \
+  # SSH server config for VS Code Remote-SSH
+  && mkdir -p /run/sshd \
+  && sed -i 's/#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config \
+  && sed -i 's/#PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config \
+  && sed -i 's/#PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config \
+  && echo "AllowUsers gsd" >> /etc/ssh/sshd_config
 
-# ── Go 1.24 ──────────────────────────────────────────────────────────────────
-RUN curl -fsSL "https://go.dev/dl/go1.24.2.linux-amd64.tar.gz" | tar -C /usr/local -xz
-ENV PATH="/usr/local/go/bin:/root/go/bin:${PATH}"
-ENV GOPATH="/home/gsd/go"
+# ═══════════════════════════════════════════════════════════════════════════════
+# LAYER 2: Cloud CLIs (changes when upgrading CLI versions)
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# ── Rust (for tools that need it) ────────────────────────────────────────────
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
-ENV PATH="/root/.cargo/bin:${PATH}"
-
-# ── kubectl ──────────────────────────────────────────────────────────────────
+# kubectl
 RUN curl -fsSL "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
       -o /usr/local/bin/kubectl && chmod +x /usr/local/bin/kubectl
 
-# ── GitHub CLI ───────────────────────────────────────────────────────────────
+# GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
       -o /usr/share/keyrings/githubcli-archive-keyring.gpg && \
     echo "deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
       > /etc/apt/sources.list.d/github-cli.list && \
     apt-get update && apt-get install -y gh && rm -rf /var/lib/apt/lists/*
 
-# ── Google Cloud SDK ─────────────────────────────────────────────────────────
+# Google Cloud SDK
 RUN curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
       | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg && \
     echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
       > /etc/apt/sources.list.d/google-cloud-sdk.list && \
     apt-get update && apt-get install -y google-cloud-cli && rm -rf /var/lib/apt/lists/*
 
-# ── AWS CLI v2 ───────────────────────────────────────────────────────────────
+# AWS CLI v2
 RUN curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip && \
-    unzip -q /tmp/awscliv2.zip -d /tmp && \
-    /tmp/aws/install && \
-    rm -rf /tmp/aws /tmp/awscliv2.zip
+    unzip -q /tmp/awscliv2.zip -d /tmp && /tmp/aws/install && rm -rf /tmp/aws /tmp/awscliv2.zip
 
-# ── Docker CLI ───────────────────────────────────────────────────────────────
+# Docker CLI
 RUN curl -fsSL https://download.docker.com/linux/debian/gpg \
       | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg && \
     echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" \
       > /etc/apt/sources.list.d/docker.list && \
     apt-get update && apt-get install -y docker-ce-cli && rm -rf /var/lib/apt/lists/*
 
-# ── Helm ─────────────────────────────────────────────────────────────────────
+# Helm
 RUN curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
-# ── Terraform ────────────────────────────────────────────────────────────────
+# Terraform
 RUN curl -fsSL https://releases.hashicorp.com/terraform/1.12.0/terraform_1.12.0_linux_amd64.zip \
-      -o /tmp/terraform.zip && \
-    unzip -q /tmp/terraform.zip -d /usr/local/bin && \
-    rm /tmp/terraform.zip
+      -o /tmp/terraform.zip && unzip -q /tmp/terraform.zip -d /usr/local/bin && rm /tmp/terraform.zip
 
-# ── Language servers & dev tools (Go) ────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# LAYER 3: Language runtimes (changes when upgrading Go/Rust versions)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Go 1.24
+RUN curl -fsSL "https://go.dev/dl/go1.24.2.linux-amd64.tar.gz" | tar -C /usr/local -xz
+ENV PATH="/usr/local/go/bin:${PATH}"
+
+# Rust (minimal — for tools that need compilation)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LAYER 4: Language servers & dev tools (changes when adding/upgrading LSPs)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Go tools
 RUN GOBIN=/usr/local/bin go install golang.org/x/tools/gopls@latest && \
     GOBIN=/usr/local/bin go install github.com/go-delve/delve/cmd/dlv@latest && \
     GOBIN=/usr/local/bin go install golang.org/x/tools/cmd/goimports@latest && \
@@ -139,10 +164,7 @@ RUN GOBIN=/usr/local/bin go install golang.org/x/tools/gopls@latest && \
     GOBIN=/usr/local/bin go install mvdan.cc/gofumpt@latest && \
     rm -rf /root/go/pkg /root/go/src
 
-# ── Install GSD v2 globally ─────────────────────────────────────────────────
-RUN npm install -g gsd-pi@2.77.0
-
-# ── Node.js language servers & tools ─────────────────────────────────────────
+# Node.js language servers & formatters
 RUN npm install -g \
     typescript \
     typescript-language-server \
@@ -156,7 +178,12 @@ RUN npm install -g \
     @tailwindcss/language-server \
     pyright
 
-# ── Python global tools ──────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# LAYER 5: GSD + Python tools (changes when upgrading gsd-pi or Python deps)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+RUN npm install -g gsd-pi@2.77.0
+
 RUN pip3 install --break-system-packages --no-cache-dir \
     pipx \
     poetry \
@@ -172,12 +199,16 @@ RUN pip3 install --break-system-packages --no-cache-dir \
     httpx \
     rich
 
-# ── Create non-root user with zsh + sudo ─────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# LAYER 6: User setup, dotfiles, VS Code server (changes when tweaking config)
+# ═══════════════════════════════════════════════════════════════════════════════
+
 RUN useradd -m -s /bin/zsh gsd && \
     echo "gsd ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/gsd && \
-    mkdir -p /workspace /home/gsd/.gsd/agent /home/gsd/go && \
+    mkdir -p /workspace /home/gsd/.gsd/agent /home/gsd/go \
+             /home/gsd/.ssh /home/gsd/.vscode-server && \
     chown -R gsd:gsd /workspace /home/gsd && \
-    ln -sf /usr/bin/fd-find /usr/local/bin/fd && \
+    chmod 700 /home/gsd/.ssh && \
     # Move rust to gsd user
     cp -r /root/.cargo /home/gsd/.cargo && \
     cp -r /root/.rustup /home/gsd/.rustup && \
@@ -191,14 +222,20 @@ ENV LC_ALL=en_US.UTF-8
 ENV GOPATH=/home/gsd/go
 ENV PATH="/usr/local/go/bin:/home/gsd/go/bin:/home/gsd/.cargo/bin:/home/gsd/.local/bin:/usr/local/bin:${PATH}"
 
-# ── Oh My Zsh + plugins ─────────────────────────────────────────────────────
+# Pre-install VS Code CLI (code-server bootstraps extensions on first connect)
+RUN curl -fsSL "https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-x64" \
+      -o /tmp/vscode-cli.tar.gz && \
+    tar -xzf /tmp/vscode-cli.tar.gz -C /home/gsd/.local/bin && \
+    rm /tmp/vscode-cli.tar.gz
+
+# Oh My Zsh + plugins
 RUN sh -c "$(wget -qO- https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended && \
     git clone --depth=1 https://github.com/zsh-users/zsh-autosuggestions \
       ${HOME}/.oh-my-zsh/custom/plugins/zsh-autosuggestions && \
     git clone --depth=1 https://github.com/zsh-users/zsh-syntax-highlighting \
       ${HOME}/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting
 
-# ── Zsh config ───────────────────────────────────────────────────────────────
+# .zshrc
 RUN sed -i 's/^ZSH_THEME=.*/ZSH_THEME="agnoster"/' ~/.zshrc && \
     sed -i 's/^plugins=.*/plugins=(git kubectl aws gcloud docker helm terraform python pip golang rust fzf zsh-autosuggestions zsh-syntax-highlighting)/' ~/.zshrc && \
     echo '' >> ~/.zshrc && \
@@ -208,14 +245,13 @@ RUN sed -i 's/^ZSH_THEME=.*/ZSH_THEME="agnoster"/' ~/.zshrc && \
     echo 'export WORKSPACE="${WORKSPACE:-/workspace/dev_root/oc-salesanalyzer-control}"' >> ~/.zshrc && \
     echo '[ -d "$WORKSPACE" ] && cd "$WORKSPACE"' >> ~/.zshrc && \
     echo '' >> ~/.zshrc && \
-    echo '# Aliases' >> ~/.zshrc && \
     echo 'alias k=kubectl' >> ~/.zshrc && \
     echo 'alias g=git' >> ~/.zshrc && \
     echo 'alias tf=terraform' >> ~/.zshrc && \
     echo 'alias py=python3' >> ~/.zshrc && \
     echo 'alias ll="ls -lah"' >> ~/.zshrc
 
-# ── tmux config ──────────────────────────────────────────────────────────────
+# .tmux.conf
 RUN echo 'set -g extended-keys on' > ~/.tmux.conf && \
     echo 'set -g default-terminal "xterm-256color"' >> ~/.tmux.conf && \
     echo 'set -ga terminal-overrides ",xterm-256color:Tc"' >> ~/.tmux.conf && \
@@ -226,17 +262,33 @@ RUN echo 'set -g extended-keys on' > ~/.tmux.conf && \
     echo 'set -g status-left "#[fg=#89b4fa,bold] GSD #[fg=#6c7086]│ "' >> ~/.tmux.conf && \
     echo 'set -g status-right "#[fg=#6c7086]%H:%M "' >> ~/.tmux.conf
 
-# ── Git config defaults ──────────────────────────────────────────────────────
+# Git defaults
 RUN git config --global init.defaultBranch main && \
     git config --global pull.rebase true && \
     git config --global push.autoSetupRemote true && \
     git config --global core.editor vim
 
+# VS Code recommended extensions list (auto-installed on first connect)
+RUN mkdir -p /home/gsd/.vscode-server/data/Machine && \
+    echo '{\n\
+  "remote.extensionKind": {\n\
+    "ms-python.python": ["workspace"],\n\
+    "golang.go": ["workspace"],\n\
+    "rust-lang.rust-analyzer": ["workspace"],\n\
+    "dbaeumer.vscode-eslint": ["workspace"],\n\
+    "esbenp.prettier-vscode": ["workspace"]\n\
+  }\n\
+}' > /home/gsd/.vscode-server/data/Machine/settings.json
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LAYER 7: Entrypoint + scripts (changes most often — rebuilds in seconds)
+# ═══════════════════════════════════════════════════════════════════════════════
+
 ENV NODE_ENV=production
 WORKDIR /workspace
 
-# ── Entrypoint ───────────────────────────────────────────────────────────────
 COPY --chown=gsd:gsd entrypoint.sh /home/gsd/entrypoint.sh
-RUN chmod +x /home/gsd/entrypoint.sh
+COPY --chown=gsd:gsd connect.sh /home/gsd/connect.sh
+RUN chmod +x /home/gsd/entrypoint.sh /home/gsd/connect.sh
 
 ENTRYPOINT ["/home/gsd/entrypoint.sh"]
