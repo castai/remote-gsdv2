@@ -236,8 +236,8 @@ RUN sh -c "$(wget -qO- https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/
     git clone --depth=1 https://github.com/zsh-users/zsh-syntax-highlighting \
       ${HOME}/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting
 
-# .zshrc
-RUN sed -i 's/^ZSH_THEME=.*/ZSH_THEME="agnoster"/' ~/.zshrc && \
+# .zshrc — use robbyrussell (no powerline fonts needed over kubectl exec)
+RUN sed -i 's/^ZSH_THEME=.*/ZSH_THEME="robbyrussell"/' ~/.zshrc && \
     sed -i 's/^plugins=.*/plugins=(git kubectl aws gcloud docker helm terraform python pip golang rust fzf zsh-autosuggestions zsh-syntax-highlighting)/' ~/.zshrc && \
     echo '' >> ~/.zshrc && \
     echo '# GSD Remote Agent' >> ~/.zshrc && \
@@ -253,7 +253,8 @@ RUN sed -i 's/^ZSH_THEME=.*/ZSH_THEME="agnoster"/' ~/.zshrc && \
     echo 'alias ll="ls -lah"' >> ~/.zshrc
 
 # .tmux.conf
-RUN echo 'set -g extended-keys on' > ~/.tmux.conf && \
+RUN echo 'set -s extended-keys on' > ~/.tmux.conf && \
+    echo 'set -as terminal-features "xterm-256color:extkeys"' >> ~/.tmux.conf && \
     echo 'set -g default-terminal "xterm-256color"' >> ~/.tmux.conf && \
     echo 'set -ga terminal-overrides ",xterm-256color:Tc"' >> ~/.tmux.conf && \
     echo 'set -g default-shell /bin/zsh' >> ~/.tmux.conf && \
