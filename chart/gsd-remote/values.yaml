@@ -32,6 +32,9 @@ tavilyAPIKey: ""
 # Contents of models.json. Pass via --set-file modelsJSON=./models.json
 modelsJSON: ""
 
+# Contents of preferences.md. Pass via --set-file preferencesmd=./preferences.md
+preferencesMD: ""
+
 # ─── Project Environment ─────────────────────────────────────────────────────
 
 # Contents of the project .env file. Pass via --set-file projectEnv=./path/to/.env

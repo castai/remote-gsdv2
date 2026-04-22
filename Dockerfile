@@ -252,30 +252,28 @@ RUN sed -i 's/^ZSH_THEME=.*/ZSH_THEME="robbyrussell"/' ~/.zshrc && \
     echo 'alias py=python3' >> ~/.zshrc && \
     echo 'alias ll="ls -lah"' >> ~/.zshrc
 
-# .tmux.conf
-RUN echo 'set -s extended-keys on' > ~/.tmux.conf && \
-    echo 'set -as terminal-features "xterm-256color:extkeys"' >> ~/.tmux.conf && \
-    echo 'set -g default-terminal "xterm-256color"' >> ~/.tmux.conf && \
-    echo 'set -ga terminal-overrides ",xterm-256color:Tc"' >> ~/.tmux.conf && \
-    echo 'set -g default-shell /bin/zsh' >> ~/.tmux.conf && \
-    echo 'set -g mouse on' >> ~/.tmux.conf && \
-    echo 'set -g history-limit 50000' >> ~/.tmux.conf && \
-    echo '' >> ~/.tmux.conf && \
-    echo '# OSC 52 clipboard — copies propagate to your local clipboard' >> ~/.tmux.conf && \
-    echo '# over kubectl exec. Requires terminal support (iTerm2, Kitty,' >> ~/.tmux.conf && \
-    echo '# Alacritty, Windows Terminal, WezTerm all support it).' >> ~/.tmux.conf && \
-    echo 'set -g set-clipboard on' >> ~/.tmux.conf && \
-    echo 'set -ga terminal-overrides ",xterm-256color:Ms=\\E]52;c;%p2%s\\007"' >> ~/.tmux.conf && \
-    echo '' >> ~/.tmux.conf && \
-    echo '# Copy mode: vi keys, y copies to clipboard via OSC 52' >> ~/.tmux.conf && \
-    echo 'setw -g mode-keys vi' >> ~/.tmux.conf && \
-    echo 'bind -T copy-mode-vi v send-keys -X begin-selection' >> ~/.tmux.conf && \
-    echo 'bind -T copy-mode-vi y send-keys -X copy-pipe-and-cancel' >> ~/.tmux.conf && \
-    echo '' >> ~/.tmux.conf && \
-    echo '# Status bar' >> ~/.tmux.conf && \
-    echo 'set -g status-style "bg=#1e1e2e,fg=#cdd6f4"' >> ~/.tmux.conf && \
-    echo 'set -g status-left "#[fg=#89b4fa,bold] GSD #[fg=#6c7086]| "' >> ~/.tmux.conf && \
-    echo 'set -g status-right "#[fg=#6c7086]%H:%M "' >> ~/.tmux.conf
+# .tmux.conf — compatible with tmux 3.3a (Debian bookworm)
+RUN printf '%s\n' \
+    'set -g default-terminal "xterm-256color"' \
+    'set -ga terminal-overrides ",xterm-256color:Tc"' \
+    'set -g default-shell /bin/zsh' \
+    'set -g mouse on' \
+    'set -g history-limit 50000' \
+    '' \
+    '# Clipboard: OSC 52 propagates copies to local clipboard' \
+    '# Works over kubectl exec with iTerm2, Kitty, Alacritty, WezTerm' \
+    'set -g set-clipboard on' \
+    '' \
+    '# Copy mode: vi keys' \
+    'setw -g mode-keys vi' \
+    'bind -T copy-mode-vi v send-keys -X begin-selection' \
+    'bind -T copy-mode-vi y send-keys -X copy-pipe-and-cancel' \
+    '' \
+    '# Status bar' \
+    'set -g status-style "bg=#1e1e2e,fg=#cdd6f4"' \
+    'set -g status-left "#[fg=#89b4fa,bold] GSD #[fg=#6c7086]| "' \
+    'set -g status-right "#[fg=#6c7086]%H:%M "' \
+    > ~/.tmux.conf
 
 # Git defaults
 RUN git config --global init.defaultBranch main && \

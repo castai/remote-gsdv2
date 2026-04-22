@@ -1,79 +1,147 @@
 # Remote GSD v2
 
-Cloud-hosted persistent coding agent on Kubernetes. Run GSD v2 in a pod — attach from any terminal or VS Code, disconnect without killing the session.
+Cloud-hosted persistent GSD v2 coding agent on Kubernetes. Your AI dev environment runs in a pod — attach from any terminal, VS Code, or browser. Disconnect without killing the session. The agent keeps working.
 
 ## Architecture
 
 ```
 ┌─────────────────────┐                              ┌──────────────────────────────┐
-│  Your Machine       │      kubectl exec -it         │  GKE Pod (gsd-remote)        │
+│  Your Machine       │      kubectl exec -it         │  GKE Pod                     │
 │                     │ ◄──────────────────────────► │  ┌──────────────────────┐    │
-│  Terminal           │     attach tmux session       │  │ tmux session         │    │
-│  VS Code            │                               │  │  └─ zsh (oh-my-zsh) │    │
-│                     │                               │  │     └─ gsd          │    │
-└─────────────────────┘                               │  └──────────────────────┘    │
-                                                      │                              │
-       Disconnect? No problem.                        │  PVC: /workspace (20Gi)     │
-       Agent keeps running.                           │  PVC: ~/.gsd (5Gi)          │
+│  Terminal (iTerm2)  │     attach tmux session       │  │ tmux session         │    │
+│  VS Code            │ ◄── code tunnel ───────────► │  │  └─ zsh (oh-my-zsh) │    │
+│  Browser            │     vscode.dev/tunnel/...     │  │     └─ gsd          │    │
+│                     │                               │  └──────────────────────┘    │
+└─────────────────────┘                               │                              │
+                                                      │  PVC: /workspace (50Gi)     │
+       Disconnect? No problem.                        │  PVC: ~/.gsd (10Gi)         │
+       Agent keeps coding.                            │  8 CPU / 64GB RAM           │
                                                       └──────────────────────────────┘
 ```
 
+## Prerequisites
+
+- `kubectl` configured with access to the target cluster
+- `helm` 3.x
+- GitHub PAT with repo access (for private repos)
+- Kimchi (AI Enabler) API token
+
 ## Quick Start
 
-### 1. Build the image
+### 1. Clone this repo
+
 ```bash
-git push origin main   # GitHub Actions builds & pushes to Artifact Registry
+git clone https://github.com/castai/remote-gsdv2.git
+cd remote-gsdv2
 ```
 
-### 2. Create the auth secret
-```bash
-kubectl create namespace gsd-remote
+### 2. Create a values file for your project
 
-kubectl create secret generic gsd-auth \
-  --namespace=gsd-remote \
-  --from-file=auth.json=$HOME/.gsd/agent/auth.json
+```yaml
+# my-project.yaml
+projectName: my-project
+gitRepo: "https://github.com/castai/my-project.git"
 ```
+
+See `chart/examples/salesanalyzer.yaml` for a full example.
 
 ### 3. Deploy
+
 ```bash
-kubectl apply -f k8s/
+helm install my-project ./chart/gsd-remote \
+  -f my-project.yaml \
+  --set githubPAT="ghp_..." \
+  --set kimchiToken="your-kimchi-token" \
+  --set tavilyAPIKey="tvly-..." \
+  --set-file modelsJSON=~/.gsd/agent/models.json \
+  --set-file projectEnv=../my-project/.env \
+  --set-file preferencesMD=~/.gsd/preferences.md
 ```
 
-### 4. Connect (Terminal)
+### 4. Connect
+
 ```bash
+# Terminal — auto-discovers your pod
 ./connect.sh
-# or directly:
-kubectl exec -it -n gsd-remote gsd-agent-0 -- tmux attach -t gsd
+
+# Terminal — specific project
+./connect.sh -p my-project
+
+# iTerm2 native mode (best clipboard support)
+./connect.sh --iterm
+
+# VS Code tunnel — opens GitHub auth, then drops into tmux
+./connect.sh --vscode
 ```
 
-Detach: `Ctrl+B, D` — agent keeps running.
+### 5. Start GSD
 
-### 5. Connect (VS Code)
+Once attached to the shell:
 
-#### Option A: Kubernetes extension (recommended)
-1. Install the [Kubernetes extension](https://marketplace.visualstudio.com/items?itemName=ms-kubernetes-tools.vscode-kubernetes-tools)
-2. In the Kubernetes sidebar, find `gsd-remote` → `gsd-agent-0`
-3. Right-click → **Attach Visual Studio Code**
-4. VS Code opens with full editor access to `/workspace`
-
-#### Option B: VS Code tunnel from inside the pod
 ```bash
-# From inside the pod (after ./connect.sh):
-code tunnel --accept-server-license-terms
-# Follow the GitHub auth link, then connect from VS Code:
-# Cmd+Shift+P → "Remote-Tunnels: Connect to Tunnel"
+gsd
 ```
 
-#### Option C: Remote-SSH via port-forward
+## Connection Methods
+
+| Method | Command | Clipboard | Best For |
+|--------|---------|-----------|----------|
+| **tmux** | `./connect.sh` | OSC 52 | Quick terminal access |
+| **iTerm2 native** | `./connect.sh --iterm` | Native Cmd+C/V | Daily driver on macOS |
+| **VS Code tunnel** | `./connect.sh --vscode` | Native | Full IDE with extensions |
+| **VS Code browser** | `https://vscode.dev/tunnel/<name>` | Native | Any machine, no install |
+
+### iTerm2 Setup
+
+Enable "Applications in terminal may access clipboard" in iTerm2 → Preferences → General → Selection.
+
+### VS Code Setup
+
+Install the **Remote - Tunnels** extension (`ms-vscode.remote-server`), then Cmd+Shift+P → **Remote-Tunnels: Connect to Tunnel**.
+
+## Helm Values Reference
+
+| Value | Description | Required |
+|-------|-------------|----------|
+| `projectName` | Resource name suffix (e.g. `salesanalyzer` → `gsd-salesanalyzer`) | **Yes** |
+| `gitRepo` | GitHub repo URL to clone on first boot | No |
+| `gitBranch` | Branch to checkout | No |
+| `githubPAT` | GitHub Personal Access Token for git + gh CLI | Recommended |
+| `kimchiToken` | Kimchi / AI Enabler API key (the `aie` provider) | Recommended |
+| `tavilyAPIKey` | Tavily search API key | No |
+| `braveAPIKey` | Brave search API key | No |
+| `modelsJSON` | Full `models.json` contents (`--set-file`) | Recommended |
+| `preferencesMD` | GSD `preferences.md` contents (`--set-file`) | No |
+| `projectEnv` | Project `.env` file contents (`--set-file`) | No |
+| `extraEnv` | Additional env vars as key-value map | No |
+| `image.repository` | Container image | Default: AR |
+| `image.tag` | Image tag | Default: `latest` |
+| `resources.requests.cpu` | CPU request | Default: `4` |
+| `resources.requests.memory` | Memory request | Default: `32Gi` |
+| `resources.limits.cpu` | CPU limit | Default: `8` |
+| `resources.limits.memory` | Memory limit | Default: `64Gi` |
+| `persistence.workspace.size` | Workspace PVC size | Default: `50Gi` |
+| `persistence.gsdHome.size` | ~/.gsd PVC size | Default: `10Gi` |
+| `namespace` | Kubernetes namespace | Default: `gsd-remote` |
+
+## Migrating an Existing Project
+
+If your project has a `.gsd` symlink (default GSD behavior), copy the real directory into the remote workspace:
+
 ```bash
-# Terminal 1: forward SSH
-kubectl port-forward -n gsd-remote svc/gsd-agent 2222:22
+# Connect to the pod
+./connect.sh
 
-# VS Code: Cmd+Shift+P → "Remote-SSH: Connect to Host"
-# Enter: ssh -p 2222 gsd@localhost
+# Inside the pod — remove the empty .gsd and copy your local one:
+# (from your local machine)
+GSD_REAL=$(readlink -f /path/to/project/.gsd)
+POD=$(kubectl get pods -n gsd-remote -l gsd/project=<name> -o jsonpath='{.items[0].metadata.name}')
+kubectl cp "${GSD_REAL}/" gsd-remote/"${POD}":/workspace/<name>/.gsd/
 ```
 
-## What's Inside
+This gives you a real `.gsd/` directory (not a symlink) that can be git-tracked — all milestones, decisions, database, activity logs persist with the repo.
+
+## What's in the Image
 
 | Category | Tools |
 |----------|-------|
@@ -85,11 +153,42 @@ kubectl port-forward -n gsd-remote svc/gsd-agent 2222:22
 | **Python tools** | uv, poetry, black, ruff, mypy, pytest, pre-commit, ipython |
 | **Search/Nav** | ripgrep, fd, fzf, tree |
 | **DB clients** | psql, mysql, redis-cli |
-| **Shell** | Oh My Zsh (agnoster) + autosuggestions + syntax-highlighting |
-| **VS Code** | CLI pre-installed, tunnel-ready |
+| **Shell** | Oh My Zsh + autosuggestions + syntax-highlighting |
+| **Editors** | vim, nano |
 
-## Image
+## Docker Image Layers
 
-- **Registry:** `us-central1-docker.pkg.dev/demos-321800/agents/gsd-remote`
-- **Base:** `node:22-slim` + full dev toolchain
-- **Layers:** 7 layers ordered by change frequency (entrypoint changes rebuild in seconds)
+The Dockerfile uses 7 layers ordered by change frequency (rarest first):
+
+```
+Layer 1: System packages (apt)          ← changes rarely
+Layer 2: Cloud CLIs (kubectl, gcloud…)  ← changes on CLI upgrades
+Layer 3: Languages (Go, Rust)           ← changes on version bumps
+Layer 4: Language servers & dev tools   ← changes on LSP upgrades
+Layer 5: GSD + Python tools             ← changes on gsd-pi upgrades
+Layer 6: User, dotfiles, VS Code CLI    ← changes on config tweaks
+Layer 7: entrypoint.sh, connect.sh      ← changes often, rebuilds in seconds
+```
+
+CI uses BuildKit with registry-backed layer caching. Entrypoint-only changes rebuild in ~30s.
+
+## Upgrading
+
+```bash
+# Update secrets/config
+helm upgrade my-project ./chart/gsd-remote \
+  -f my-project.yaml \
+  --set githubPAT="..." \
+  --set kimchiToken="..."
+
+# Roll out a new image after a git push (CI builds automatically)
+kubectl rollout restart deployment/gsd-my-project -n gsd-remote
+```
+
+## Teardown
+
+```bash
+helm uninstall my-project
+# PVCs are retained — delete manually if you want to wipe the workspace:
+kubectl delete pvc gsd-my-project-workspace gsd-my-project-gsd-home -n gsd-remote
+```
