@@ -238,7 +238,7 @@ RUN sh -c "$(wget -qO- https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/
 
 # .zshrc — use robbyrussell (no powerline fonts needed over kubectl exec)
 RUN sed -i 's/^ZSH_THEME=.*/ZSH_THEME="robbyrussell"/' ~/.zshrc && \
-    sed -i 's/^plugins=.*/plugins=(git kubectl aws gcloud docker helm terraform python pip golang rust zsh-autosuggestions zsh-syntax-highlighting)/' ~/.zshrc && \
+    sed -i 's/^plugins=.*/plugins=(kubectl aws gcloud docker helm terraform python pip golang rust zsh-autosuggestions zsh-syntax-highlighting)/' ~/.zshrc && \
     echo '' >> ~/.zshrc && \
     echo '# GSD Remote Agent' >> ~/.zshrc && \
     echo 'export GOPATH="$HOME/go"' >> ~/.zshrc && \
