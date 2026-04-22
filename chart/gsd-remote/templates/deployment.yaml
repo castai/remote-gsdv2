@@ -38,11 +38,14 @@ spec:
               # Ensure agent dir exists on the PVC
               mkdir -p /gsd-home/agent
 
+              # Make shared volume accessible
+              chmod 777 /shared
+
               {{- if .Values.githubPAT }}
               # Write git credentials to a shared volume
               echo "https://x-access-token:$(cat /secrets/github-pat)@github.com" > /shared/.git-credentials
-              chmod 600 /shared/.git-credentials
               chown 1000:1000 /shared/.git-credentials
+              chmod 644 /shared/.git-credentials
               {{- end }}
 
               {{- if .Values.modelsJSON }}
@@ -55,6 +58,7 @@ spec:
               # Stage project .env for entrypoint to copy after clone
               cp /secrets/project.env /shared/.project-env
               chown 1000:1000 /shared/.project-env
+              chmod 644 /shared/.project-env
               {{- end }}
 
               echo "init complete"

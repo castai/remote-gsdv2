@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+set -uo pipefail
 
 # ─── Remote GSD v2 Entrypoint ───────────────────────────────────────────────
 # Clones the project repo (if not already present), configures git credentials,
@@ -35,8 +35,9 @@ git config --global credential.helper store
 
 # Pick up credentials from shared volume (written by init container)
 if [ -f /home/gsd/.shared/.git-credentials ]; then
-  cp /home/gsd/.shared/.git-credentials /home/gsd/.git-credentials
-  chmod 600 /home/gsd/.git-credentials
+  cp /home/gsd/.shared/.git-credentials /home/gsd/.git-credentials 2>/dev/null && \
+    chmod 600 /home/gsd/.git-credentials || \
+    echo "[entrypoint] WARN: Could not copy git credentials"
 fi
 
 # ── Clone repo if workspace is empty ─────────────────────────────────────────
@@ -44,9 +45,11 @@ if [ -n "${GIT_REPO}" ] && [ ! -d "${WORKSPACE}/.git" ]; then
   echo "[entrypoint] Cloning ${GIT_REPO}..."
   mkdir -p "$(dirname "${WORKSPACE}")"
   if [ -n "${GIT_BRANCH}" ]; then
-    git clone --branch "${GIT_BRANCH}" "${GIT_REPO}" "${WORKSPACE}" 2>&1
+    git clone --branch "${GIT_BRANCH}" "${GIT_REPO}" "${WORKSPACE}" 2>&1 || \
+      echo "[entrypoint] WARN: Clone failed — you can clone manually from the shell"
   else
-    git clone "${GIT_REPO}" "${WORKSPACE}" 2>&1
+    git clone "${GIT_REPO}" "${WORKSPACE}" 2>&1 || \
+      echo "[entrypoint] WARN: Clone failed — you can clone manually from the shell"
   fi
   echo "[entrypoint] ✓ Clone complete"
 elif [ ! -d "${WORKSPACE}" ]; then
