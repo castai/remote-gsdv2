@@ -302,6 +302,7 @@ WORKDIR /workspace
 
 COPY --chown=gsd:gsd entrypoint.sh /home/gsd/entrypoint.sh
 COPY --chown=gsd:gsd connect.sh /home/gsd/connect.sh
-RUN chmod +x /home/gsd/entrypoint.sh /home/gsd/connect.sh
+COPY --chown=gsd:gsd vscode-tunnel.sh /usr/local/bin/vscode-tunnel
+RUN chmod +x /home/gsd/entrypoint.sh /home/gsd/connect.sh /usr/local/bin/vscode-tunnel
 
 ENTRYPOINT ["/home/gsd/entrypoint.sh"]
