@@ -260,8 +260,21 @@ RUN echo 'set -s extended-keys on' > ~/.tmux.conf && \
     echo 'set -g default-shell /bin/zsh' >> ~/.tmux.conf && \
     echo 'set -g mouse on' >> ~/.tmux.conf && \
     echo 'set -g history-limit 50000' >> ~/.tmux.conf && \
+    echo '' >> ~/.tmux.conf && \
+    echo '# OSC 52 clipboard — copies propagate to your local clipboard' >> ~/.tmux.conf && \
+    echo '# over kubectl exec. Requires terminal support (iTerm2, Kitty,' >> ~/.tmux.conf && \
+    echo '# Alacritty, Windows Terminal, WezTerm all support it).' >> ~/.tmux.conf && \
+    echo 'set -g set-clipboard on' >> ~/.tmux.conf && \
+    echo 'set -ga terminal-overrides ",xterm-256color:Ms=\\E]52;c;%p2%s\\7"' >> ~/.tmux.conf && \
+    echo '' >> ~/.tmux.conf && \
+    echo '# Copy mode: vi keys, y copies to clipboard via OSC 52' >> ~/.tmux.conf && \
+    echo 'setw -g mode-keys vi' >> ~/.tmux.conf && \
+    echo 'bind -T copy-mode-vi v send-keys -X begin-selection' >> ~/.tmux.conf && \
+    echo 'bind -T copy-mode-vi y send-keys -X copy-pipe-and-cancel' >> ~/.tmux.conf && \
+    echo '' >> ~/.tmux.conf && \
+    echo '# Status bar' >> ~/.tmux.conf && \
     echo 'set -g status-style "bg=#1e1e2e,fg=#cdd6f4"' >> ~/.tmux.conf && \
-    echo 'set -g status-left "#[fg=#89b4fa,bold] GSD #[fg=#6c7086]│ "' >> ~/.tmux.conf && \
+    echo 'set -g status-left "#[fg=#89b4fa,bold] GSD #[fg=#6c7086]| "' >> ~/.tmux.conf && \
     echo 'set -g status-right "#[fg=#6c7086]%H:%M "' >> ~/.tmux.conf
 
 # Git defaults
