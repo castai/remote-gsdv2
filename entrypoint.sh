@@ -33,6 +33,12 @@ git config --global --get user.name >/dev/null 2>&1 || \
 git config --global init.defaultBranch main
 git config --global credential.helper store
 
+# Pick up credentials from shared volume (written by init container)
+if [ -f /home/gsd/.shared/.git-credentials ]; then
+  cp /home/gsd/.shared/.git-credentials /home/gsd/.git-credentials
+  chmod 600 /home/gsd/.git-credentials
+fi
+
 # ── Clone repo if workspace is empty ─────────────────────────────────────────
 if [ -n "${GIT_REPO}" ] && [ ! -d "${WORKSPACE}/.git" ]; then
   echo "[entrypoint] Cloning ${GIT_REPO}..."
@@ -52,9 +58,9 @@ fi
 cd "${WORKSPACE}"
 
 # ── Copy project .env if staged by init container ────────────────────────────
-if [ -f /home/gsd/.project-env ]; then
+if [ -f /home/gsd/.shared/.project-env ]; then
   echo "[entrypoint] Copying project .env..."
-  cp /home/gsd/.project-env "${WORKSPACE}/.env"
+  cp /home/gsd/.shared/.project-env "${WORKSPACE}/.env"
   echo "[entrypoint] ✓ .env installed"
 fi
 

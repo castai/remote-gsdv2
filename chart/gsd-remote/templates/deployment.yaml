@@ -31,30 +31,43 @@ spec:
             - sh
             - -c
             - |
-              chown -R 1000:1000 /workspace /home/gsd/.gsd
+              set -e
+              # Fix PVC ownership
+              chown -R 1000:1000 /workspace /gsd-home
+
+              # Ensure agent dir exists on the PVC
+              mkdir -p /gsd-home/agent
+
               {{- if .Values.githubPAT }}
-              echo "https://x-access-token:$(cat /secrets/github-pat)@github.com" > /home/gsd/.git-credentials
-              chown 1000:1000 /home/gsd/.git-credentials
-              chmod 600 /home/gsd/.git-credentials
+              # Write git credentials to a shared volume
+              echo "https://x-access-token:$(cat /secrets/github-pat)@github.com" > /shared/.git-credentials
+              chmod 600 /shared/.git-credentials
+              chown 1000:1000 /shared/.git-credentials
               {{- end }}
+
               {{- if .Values.modelsJSON }}
-              cp /secrets/models.json /home/gsd/.gsd/agent/models.json
-              chown 1000:1000 /home/gsd/.gsd/agent/models.json
+              # Copy models.json into gsd agent dir on the PVC
+              cp /secrets/models.json /gsd-home/agent/models.json
+              chown 1000:1000 /gsd-home/agent/models.json
               {{- end }}
+
               {{- if .Values.projectEnv }}
-              cp /secrets/project.env /home/gsd/.project-env
-              chown 1000:1000 /home/gsd/.project-env
+              # Stage project .env for entrypoint to copy after clone
+              cp /secrets/project.env /shared/.project-env
+              chown 1000:1000 /shared/.project-env
               {{- end }}
+
+              echo "init complete"
           volumeMounts:
             - name: workspace
               mountPath: /workspace
             - name: gsd-home
-              mountPath: /home/gsd/.gsd
+              mountPath: /gsd-home
             - name: secrets
               mountPath: /secrets
               readOnly: true
-            - name: home-dir
-              mountPath: /home/gsd
+            - name: shared
+              mountPath: /shared
       containers:
         - name: gsd
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -94,17 +107,16 @@ spec:
               mountPath: /home/gsd/.gsd/agent/auth.json
               subPath: auth.json
               readOnly: true
-            - name: home-dir
-              mountPath: /home/gsd/.git-credentials
-              subPath: .git-credentials
-              readOnly: true
+            - name: shared
+              mountPath: /home/gsd/.shared
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           livenessProbe:
             exec:
               command: ["tmux", "has-session", "-t", "gsd"]
-            initialDelaySeconds: 15
+            initialDelaySeconds: 30
             periodSeconds: 30
+            failureThreshold: 5
       volumes:
         - name: workspace
           persistentVolumeClaim:
@@ -121,5 +133,5 @@ spec:
             items:
               - key: auth.json
                 path: auth.json
-        - name: home-dir
+        - name: shared
           emptyDir: {}
