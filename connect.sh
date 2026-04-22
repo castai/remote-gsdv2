@@ -15,6 +15,7 @@ PROJECT=""
 TUNNEL_NAME="${GSD_TUNNEL_NAME:-gsd-remote}"
 VSCODE_MODE=false
 ITERM_MODE=false
+LIST_MODE=false
 NEW_SESSION=""
 SESSION_NAME=""
 
@@ -24,6 +25,7 @@ while [[ $# -gt 0 ]]; do
     --vscode) VSCODE_MODE=true; shift ;;
     --iterm) ITERM_MODE=true; shift ;;
     --new) NEW_SESSION="$2"; shift 2 ;;
+    --list|-l) LIST_MODE=true; shift ;;
     --project|-p) PROJECT="$2"; shift 2 ;;
     --namespace|-n) NAMESPACE="$2"; shift 2 ;;
     --help|-h)
@@ -32,6 +34,7 @@ while [[ $# -gt 0 ]]; do
       echo "Options:"
       echo "  --project, -p <name>  Connect to a specific project (e.g. salesanalyzer)"
       echo "  --new <name>          Create and attach a new tmux session (e.g. steering)"
+      echo "  --list, -l            List pods and tmux sessions without attaching"
       echo "  --namespace, -n <ns>  K8s namespace (default: gsd-remote)"
       echo "  --vscode              Start a VS Code tunnel before attaching tmux"
       echo "  --iterm               Use iTerm2 native tmux integration (tmux -CC)"
@@ -129,6 +132,33 @@ if [ -n "${PROJECT}" ]; then
   echo "✓ Found: ${PROJECT} (${POD})"
 else
   discover_pod
+fi
+
+# ── List mode — show everything and exit ─────────────────────────────────────
+if [ "${LIST_MODE}" = true ]; then
+  echo ""
+  echo "┌─────────────────────────────────────────────────┐"
+  echo "│  Pod: ${POD}"
+  echo "│  Project: ${PROJECT:-unknown}"
+  echo "└─────────────────────────────────────────────────┘"
+  echo ""
+
+  SESSIONS=$(kubectl exec -n "${NAMESPACE}" "${POD}" -- \
+    tmux list-sessions -F '  #{session_name}  #{session_windows} window(s)  #{?session_attached,attached,detached}' 2>/dev/null || true)
+
+  if [ -n "${SESSIONS}" ]; then
+    echo "  tmux sessions:"
+    echo "${SESSIONS}"
+  else
+    echo "  No tmux sessions"
+  fi
+
+  TUNNEL=$(kubectl exec -n "${NAMESPACE}" "${POD}" -- \
+    bash -c 'pgrep -f "code.*tunnel" >/dev/null 2>&1 && echo "running" || echo "stopped"' 2>/dev/null || echo "unknown")
+  echo ""
+  echo "  VS Code tunnel: ${TUNNEL}"
+  echo ""
+  exit 0
 fi
 
 # ── VS Code tunnel ──────────────────────────────────────────────────────────
