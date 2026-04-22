@@ -2,44 +2,73 @@
 set -euo pipefail
 
 # ─── Remote GSD v2 Entrypoint ───────────────────────────────────────────────
-# Runs GSD inside a tmux session. Attach/detach via:
-#   kubectl exec -it -n gsd-remote gsd-agent-0 -- tmux attach -t gsd
+# Clones the project repo (if not already present), configures git credentials,
+# copies the project .env, then starts a tmux session with zsh.
 #
-# If you disconnect, the tmux session keeps running. Reattach anytime.
+# Attach: kubectl exec -it <pod> -- tmux attach -t gsd
+# Detach: Ctrl+B, D
 # ─────────────────────────────────────────────────────────────────────────────
 
-WORKSPACE="${WORKSPACE:-/workspace/dev_root/oc-salesanalyzer-control}"
+WORKSPACE="${WORKSPACE:-/workspace/project}"
+GIT_REPO="${GIT_REPO:-}"
+GIT_BRANCH="${GIT_BRANCH:-}"
+PROJECT_NAME="${PROJECT_NAME:-gsd}"
 TMUX_SESSION="gsd"
 
 echo "═══════════════════════════════════════════════════════════════"
-echo "  GSD v2 Remote Agent (tmux mode)"
+echo "  GSD v2 Remote Agent"
+echo "  Project:   ${PROJECT_NAME}"
 echo "  Workspace: ${WORKSPACE}"
+echo "  Repo:      ${GIT_REPO:-<none>}"
 echo ""
-echo "  Attach:  kubectl exec -it -n gsd-remote gsd-agent-0 -- tmux attach -t gsd"
+echo "  Attach:  kubectl exec -it <pod> -- tmux attach -t gsd"
 echo "  Detach:  Ctrl+B, D"
 echo "═══════════════════════════════════════════════════════════════"
 
-# ── Ensure workspace exists and has git ──────────────────────────────────────
-if [ ! -d "${WORKSPACE}" ]; then
-  echo "[entrypoint] Creating workspace at ${WORKSPACE}..."
-  mkdir -p "${WORKSPACE}"
-fi
-
-cd "${WORKSPACE}"
-
-if [ ! -d .git ]; then
-  echo "[entrypoint] Initializing git repo in ${WORKSPACE}..."
-  git init
-fi
-
+# ── Git config ───────────────────────────────────────────────────────────────
 git config --global --get user.email >/dev/null 2>&1 || \
   git config --global user.email "gsd-agent@remote"
 git config --global --get user.name >/dev/null 2>&1 || \
   git config --global user.name "GSD Remote Agent"
 git config --global init.defaultBranch main
+git config --global credential.helper store
 
-# ── Start tmux with GSD ─────────────────────────────────────────────────────
-# If session already exists (container restart with preserved PVC), attach to it.
+# ── Clone repo if workspace is empty ─────────────────────────────────────────
+if [ -n "${GIT_REPO}" ] && [ ! -d "${WORKSPACE}/.git" ]; then
+  echo "[entrypoint] Cloning ${GIT_REPO}..."
+  mkdir -p "$(dirname "${WORKSPACE}")"
+  if [ -n "${GIT_BRANCH}" ]; then
+    git clone --branch "${GIT_BRANCH}" "${GIT_REPO}" "${WORKSPACE}" 2>&1
+  else
+    git clone "${GIT_REPO}" "${WORKSPACE}" 2>&1
+  fi
+  echo "[entrypoint] ✓ Clone complete"
+elif [ ! -d "${WORKSPACE}" ]; then
+  echo "[entrypoint] Creating workspace at ${WORKSPACE}..."
+  mkdir -p "${WORKSPACE}"
+  cd "${WORKSPACE}" && git init
+fi
+
+cd "${WORKSPACE}"
+
+# ── Copy project .env if staged by init container ────────────────────────────
+if [ -f /home/gsd/.project-env ]; then
+  echo "[entrypoint] Copying project .env..."
+  cp /home/gsd/.project-env "${WORKSPACE}/.env"
+  echo "[entrypoint] ✓ .env installed"
+fi
+
+# ── GitHub CLI auth (if PAT available) ───────────────────────────────────────
+if [ -f /home/gsd/.git-credentials ]; then
+  # Extract token from credentials file for gh CLI
+  GH_TOKEN=$(grep -oP 'x-access-token:\K[^@]+' /home/gsd/.git-credentials 2>/dev/null || true)
+  if [ -n "${GH_TOKEN}" ]; then
+    echo "[entrypoint] Configuring GitHub CLI..."
+    echo "${GH_TOKEN}" | gh auth login --with-token 2>/dev/null || true
+  fi
+fi
+
+# ── Start tmux session ──────────────────────────────────────────────────────
 if tmux has-session -t "${TMUX_SESSION}" 2>/dev/null; then
   echo "[entrypoint] Existing tmux session found. Keeping it alive."
 else
@@ -48,17 +77,15 @@ else
 fi
 
 echo "[entrypoint] ✓ tmux session '${TMUX_SESSION}' is running."
-echo "[entrypoint] Container will stay alive. Attach with:"
-echo "  kubectl exec -it -n gsd-remote gsd-agent-0 -- tmux attach -t gsd"
+echo "[entrypoint] Container will stay alive. Run 'gsd' inside the session to start the agent."
 echo ""
 
 # ── Keep container alive ────────────────────────────────────────────────────
-# If the tmux session dies (gsd exits), restart it.
 while true; do
   if ! tmux has-session -t "${TMUX_SESSION}" 2>/dev/null; then
-    echo "[entrypoint] tmux session ended — restarting GSD..."
+    echo "[entrypoint] tmux session ended — restarting shell..."
     sleep 2
-    tmux new-session -d -s "${TMUX_SESSION}" -c "${WORKSPACE}" "gsd"
+    tmux new-session -d -s "${TMUX_SESSION}" -c "${WORKSPACE}"
   fi
   sleep 10
 done

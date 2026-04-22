@@ -1,0 +1,6 @@
+apiVersion: v2
+name: gsd-remote
+description: Cloud-hosted persistent GSD v2 coding agent
+type: application
+version: 0.1.0
+appVersion: "2.77.0"

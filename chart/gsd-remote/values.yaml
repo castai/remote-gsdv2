@@ -1,0 +1,75 @@
+# ─── GSD Remote Agent — Helm Values ──────────────────────────────────────────
+# Install: helm install my-agent ./chart/gsd-remote -f my-values.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Project identifier — used as deployment name suffix and resource labels.
+# e.g. "salesanalyzer" → deployment "gsd-salesanalyzer", pvc "gsd-salesanalyzer-workspace"
+projectName: ""
+
+# GitHub repo to clone into the workspace on first boot.
+# e.g. "https://github.com/castai/oc-salesanalyzer-control.git"
+gitRepo: ""
+
+# Git branch to checkout (default: repo default branch)
+gitBranch: ""
+
+# ─── Secrets ─────────────────────────────────────────────────────────────────
+
+# GitHub Personal Access Token — used for git clone, gh CLI, push/pull.
+githubPAT: ""
+
+# Kimchi (AI Enabler) API token — the "aie" provider key.
+kimchiToken: ""
+
+# Brave Search API key (optional)
+braveAPIKey: ""
+
+# Tavily Search API key (optional)
+tavilyAPIKey: ""
+
+# ─── Models ──────────────────────────────────────────────────────────────────
+
+# Contents of models.json. Pass via --set-file modelsJSON=./models.json
+modelsJSON: ""
+
+# ─── Project Environment ─────────────────────────────────────────────────────
+
+# Contents of the project .env file. Pass via --set-file projectEnv=./path/to/.env
+# Mounted at /workspace/project/.env after clone.
+projectEnv: ""
+
+# Additional environment variables injected into the container.
+extraEnv: {}
+  # DATABASE_URL: "postgresql://user:pass@host:5432/db"
+  # SLACK_BOT_TOKEN: "xoxb-..."
+
+# ─── Image ───────────────────────────────────────────────────────────────────
+
+image:
+  repository: us-central1-docker.pkg.dev/demos-321800/agents/gsd-remote
+  tag: latest
+  pullPolicy: Always
+
+# ─── Resources (workstation-class) ───────────────────────────────────────────
+
+resources:
+  requests:
+    cpu: "4"
+    memory: 32Gi
+  limits:
+    cpu: "8"
+    memory: 64Gi
+
+# ─── Storage ─────────────────────────────────────────────────────────────────
+
+persistence:
+  workspace:
+    size: 50Gi
+    storageClass: standard-rwo
+  gsdHome:
+    size: 10Gi
+    storageClass: standard-rwo
+
+# ─── Namespace ───────────────────────────────────────────────────────────────
+
+namespace: gsd-remote

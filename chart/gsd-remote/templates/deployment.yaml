@@ -1,0 +1,125 @@
+{{- $fullName := include "gsd-remote.fullname" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullName }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "gsd-remote.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "gsd-remote.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "gsd-remote.selectorLabels" . | nindent 8 }}
+        gsd/project: {{ .Values.projectName }}
+      annotations:
+        checksum/secrets: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        fsGroup: 1000
+      initContainers:
+        - name: init
+          image: busybox:1.37
+          command:
+            - sh
+            - -c
+            - |
+              chown -R 1000:1000 /workspace /home/gsd/.gsd
+              {{- if .Values.githubPAT }}
+              echo "https://x-access-token:$(cat /secrets/github-pat)@github.com" > /home/gsd/.git-credentials
+              chown 1000:1000 /home/gsd/.git-credentials
+              chmod 600 /home/gsd/.git-credentials
+              {{- end }}
+              {{- if .Values.modelsJSON }}
+              cp /secrets/models.json /home/gsd/.gsd/agent/models.json
+              chown 1000:1000 /home/gsd/.gsd/agent/models.json
+              {{- end }}
+              {{- if .Values.projectEnv }}
+              cp /secrets/project.env /home/gsd/.project-env
+              chown 1000:1000 /home/gsd/.project-env
+              {{- end }}
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: gsd-home
+              mountPath: /home/gsd/.gsd
+            - name: secrets
+              mountPath: /secrets
+              readOnly: true
+            - name: home-dir
+              mountPath: /home/gsd
+      containers:
+        - name: gsd
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: WORKSPACE
+              value: "/workspace/project"
+            - name: GIT_REPO
+              value: {{ .Values.gitRepo | quote }}
+            {{- if .Values.gitBranch }}
+            - name: GIT_BRANCH
+              value: {{ .Values.gitBranch | quote }}
+            {{- end }}
+            - name: PROJECT_NAME
+              value: {{ .Values.projectName | quote }}
+            - name: NODE_ENV
+              value: "production"
+            - name: TERM
+              value: "xterm-256color"
+            {{- if .Values.braveAPIKey }}
+            - name: BRAVE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $fullName }}-secrets
+                  key: brave-api-key
+            {{- end }}
+            {{- range $key, $value := .Values.extraEnv }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: gsd-home
+              mountPath: /home/gsd/.gsd
+            - name: auth
+              mountPath: /home/gsd/.gsd/agent/auth.json
+              subPath: auth.json
+              readOnly: true
+            - name: home-dir
+              mountPath: /home/gsd/.git-credentials
+              subPath: .git-credentials
+              readOnly: true
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            exec:
+              command: ["tmux", "has-session", "-t", "gsd"]
+            initialDelaySeconds: 15
+            periodSeconds: 30
+      volumes:
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: {{ $fullName }}-workspace
+        - name: gsd-home
+          persistentVolumeClaim:
+            claimName: {{ $fullName }}-gsd-home
+        - name: secrets
+          secret:
+            secretName: {{ $fullName }}-secrets
+        - name: auth
+          secret:
+            secretName: {{ $fullName }}-secrets
+            items:
+              - key: auth.json
+                path: auth.json
+        - name: home-dir
+          emptyDir: {}

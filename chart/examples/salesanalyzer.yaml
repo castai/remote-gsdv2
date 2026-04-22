@@ -1,0 +1,16 @@
+# ─── Example: Sales Analyzer Control ─────────────────────────────────────────
+# Deploy with:
+#   helm install salesanalyzer ./chart/gsd-remote \
+#     -f chart/examples/salesanalyzer.yaml \
+#     --set-file modelsJSON=~/.gsd/agent/models.json \
+#     --set-file projectEnv=../oc_salesanalyzer_control/.env
+# ─────────────────────────────────────────────────────────────────────────────
+
+projectName: salesanalyzer
+gitRepo: "https://github.com/castai/oc-salesanalyzer-control.git"
+
+# Secrets — override via --set or a separate secrets file (don't commit!)
+# githubPAT: "ghp_..."
+# kimchiToken: "..."
+# tavilyAPIKey: "tvly-..."
+# braveAPIKey: "BSA..."
