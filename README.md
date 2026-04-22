@@ -107,7 +107,6 @@ First time requires GitHub device auth — follow the URL it prints. After that,
 | `--project, -p <name>` | Connect to a specific project by name |
 | `--new <name>` | Create a new tmux session and attach (e.g. `--new steering`) |
 | `--list, -l` | Show pods, tmux sessions, and VS Code tunnel status |
-| `--vscode` | Start VS Code tunnel before attaching tmux |
 | `--namespace, -n <ns>` | Kubernetes namespace (default: `gsd-remote`) |
 
 ### Multiple Sessions
