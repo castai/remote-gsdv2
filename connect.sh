@@ -15,6 +15,7 @@ PROJECT=""
 TUNNEL_NAME="${GSD_TUNNEL_NAME:-gsd-remote}"
 VSCODE_MODE=false
 ITERM_MODE=false
+NEW_SESSION=""
 SESSION_NAME=""
 
 # ── Parse args ───────────────────────────────────────────────────────────────
@@ -22,6 +23,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --vscode) VSCODE_MODE=true; shift ;;
     --iterm) ITERM_MODE=true; shift ;;
+    --new) NEW_SESSION="$2"; shift 2 ;;
     --project|-p) PROJECT="$2"; shift 2 ;;
     --namespace|-n) NAMESPACE="$2"; shift 2 ;;
     --help|-h)
@@ -29,9 +31,16 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "Options:"
       echo "  --project, -p <name>  Connect to a specific project (e.g. salesanalyzer)"
+      echo "  --new <name>          Create and attach a new tmux session (e.g. steering)"
       echo "  --namespace, -n <ns>  K8s namespace (default: gsd-remote)"
       echo "  --vscode              Start a VS Code tunnel before attaching tmux"
       echo "  --iterm               Use iTerm2 native tmux integration (tmux -CC)"
+      echo ""
+      echo "Examples:"
+      echo "  ./connect.sh                          # attach to existing session"
+      echo "  ./connect.sh --new steering            # new session for steering"
+      echo "  ./connect.sh --new steering --iterm    # new session, iTerm2 native"
+      echo "  ./connect.sh --iterm                   # attach existing, iTerm2 native"
       echo ""
       echo "If multiple GSD pods are running, you'll be prompted to pick one."
       exit 0
@@ -184,6 +193,17 @@ TMUX_CMD="tmux"
 if [ "${ITERM_MODE}" = true ]; then
   TMUX_CMD="tmux -CC"
   echo "  (iTerm2 native mode — windows appear as native tabs)"
+fi
+
+# Create new session if --new was given
+if [ -n "${NEW_SESSION}" ]; then
+  echo "→ Creating new tmux session '${NEW_SESSION}'..."
+  # Get the workspace path from the pod
+  WORK_DIR=$(kubectl exec -n "${NAMESPACE}" "${POD}" -- bash -c 'echo $WORKSPACE' 2>/dev/null || echo "/workspace")
+  kubectl exec -n "${NAMESPACE}" "${POD}" -- tmux new-session -d -s "${NEW_SESSION}" -c "${WORK_DIR}" 2>/dev/null || true
+  echo "  Attaching... (detach: Ctrl+B, D)"
+  echo ""
+  exec kubectl exec -it -n "${NAMESPACE}" "${POD}" -- ${TMUX_CMD} attach -t "${NEW_SESSION}"
 fi
 
 # Direct session name given
