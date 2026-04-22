@@ -32,6 +32,7 @@ git config --global --get user.name >/dev/null 2>&1 || \
   git config --global user.name "GSD Remote Agent"
 git config --global init.defaultBranch main
 git config --global credential.helper store
+git config --global --add safe.directory '*'
 
 # Pick up credentials from shared volume (written by init container)
 if [ -f /home/gsd/.shared/.git-credentials ]; then

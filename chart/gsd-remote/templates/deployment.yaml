@@ -78,7 +78,7 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
             - name: WORKSPACE
-              value: "/workspace/project"
+              value: "/workspace/{{ .Values.projectName }}"
             - name: GIT_REPO
               value: {{ .Values.gitRepo | quote }}
             {{- if .Values.gitBranch }}
