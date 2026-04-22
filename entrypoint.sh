@@ -43,8 +43,8 @@ git config --global init.defaultBranch main
 if tmux has-session -t "${TMUX_SESSION}" 2>/dev/null; then
   echo "[entrypoint] Existing tmux session found. Keeping it alive."
 else
-  echo "[entrypoint] Starting tmux session '${TMUX_SESSION}' with GSD..."
-  tmux new-session -d -s "${TMUX_SESSION}" -c "${WORKSPACE}" "gsd"
+  echo "[entrypoint] Starting tmux session '${TMUX_SESSION}' (shell)..."
+  tmux new-session -d -s "${TMUX_SESSION}" -c "${WORKSPACE}"
 fi
 
 echo "[entrypoint] ✓ tmux session '${TMUX_SESSION}' is running."
