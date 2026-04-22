@@ -61,17 +61,17 @@ helm install my-project ./chart/gsd-remote \
 ### 4. Connect
 
 ```bash
-# Terminal — auto-discovers your pod
+# Auto-discover pod, attach to tmux
 ./connect.sh
 
-# Terminal — specific project
-./connect.sh -p my-project
-
-# iTerm2 native mode (best clipboard support)
+# iTerm2 native mode (recommended on macOS — best clipboard support)
 ./connect.sh --iterm
 
-# VS Code tunnel — opens GitHub auth, then drops into tmux
-./connect.sh --vscode
+# Connect to a specific project
+./connect.sh -p my-project
+
+# See what's running
+./connect.sh --list
 ```
 
 ### 5. Start GSD
@@ -82,22 +82,45 @@ Once attached to the shell:
 gsd
 ```
 
-## Connection Methods
+### 6. VS Code (optional)
 
-| Method | Command | Clipboard | Best For |
-|--------|---------|-----------|----------|
-| **tmux** | `./connect.sh` | OSC 52 | Quick terminal access |
-| **iTerm2 native** | `./connect.sh --iterm` | Native Cmd+C/V | Daily driver on macOS |
-| **VS Code tunnel** | `./connect.sh --vscode` | Native | Full IDE with extensions |
-| **VS Code browser** | `https://vscode.dev/tunnel/<name>` | Native | Any machine, no install |
+From inside the tmux session, run:
 
-### iTerm2 Setup
+```bash
+vscode-tunnel
+```
 
-Enable "Applications in terminal may access clipboard" in iTerm2 → Preferences → General → Selection.
+First time requires GitHub device auth — follow the URL it prints. After that, connect from:
+- **VS Code desktop**: Install [Remote - Tunnels](https://marketplace.visualstudio.com/items?itemName=ms-vscode.remote-server) extension → Cmd+Shift+P → Remote-Tunnels: Connect to Tunnel
+- **Browser**: `https://vscode.dev/tunnel/<project-name>`
 
-### VS Code Setup
+## connect.sh Reference
 
-Install the **Remote - Tunnels** extension (`ms-vscode.remote-server`), then Cmd+Shift+P → **Remote-Tunnels: Connect to Tunnel**.
+```bash
+./connect.sh [options] [tmux-session-name]
+```
+
+| Flag | Description |
+|------|-------------|
+| *(no flags)* | Auto-discover pod, attach to tmux. Picker if multiple pods/sessions. |
+| `--iterm` | Use iTerm2 native tmux integration (Cmd+C/V clipboard works) |
+| `--project, -p <name>` | Connect to a specific project by name |
+| `--new <name>` | Create a new tmux session and attach (e.g. `--new steering`) |
+| `--list, -l` | Show pods, tmux sessions, and VS Code tunnel status |
+| `--vscode` | Start VS Code tunnel before attaching tmux |
+| `--namespace, -n <ns>` | Kubernetes namespace (default: `gsd-remote`) |
+
+### Multiple Sessions
+
+Run GSD auto-mode in one session and steer from another:
+
+```bash
+# Session 1: main agent (auto-mode)
+./connect.sh --iterm
+
+# Session 2: steering / monitoring
+./connect.sh --new steering --iterm
+```
 
 ## Helm Values Reference
 
@@ -114,7 +137,7 @@ Install the **Remote - Tunnels** extension (`ms-vscode.remote-server`), then Cmd
 | `preferencesMD` | GSD `preferences.md` contents (`--set-file`) | No |
 | `projectEnv` | Project `.env` file contents (`--set-file`) | No |
 | `extraEnv` | Additional env vars as key-value map | No |
-| `image.repository` | Container image | Default: AR |
+| `image.repository` | Container image | Default: Artifact Registry |
 | `image.tag` | Image tag | Default: `latest` |
 | `resources.requests.cpu` | CPU request | Default: `4` |
 | `resources.requests.memory` | Memory request | Default: `32Gi` |
@@ -126,20 +149,16 @@ Install the **Remote - Tunnels** extension (`ms-vscode.remote-server`), then Cmd
 
 ## Migrating an Existing Project
 
-If your project has a `.gsd` symlink (default GSD behavior), copy the real directory into the remote workspace:
+If your local project has a `.gsd` symlink (default GSD behavior), copy the real directory into the remote workspace so it becomes a git-trackable directory:
 
 ```bash
-# Connect to the pod
-./connect.sh
-
-# Inside the pod — remove the empty .gsd and copy your local one:
-# (from your local machine)
+# From your local machine
 GSD_REAL=$(readlink -f /path/to/project/.gsd)
 POD=$(kubectl get pods -n gsd-remote -l gsd/project=<name> -o jsonpath='{.items[0].metadata.name}')
 kubectl cp "${GSD_REAL}/" gsd-remote/"${POD}":/workspace/<name>/.gsd/
 ```
 
-This gives you a real `.gsd/` directory (not a symlink) that can be git-tracked — all milestones, decisions, database, activity logs persist with the repo.
+This gives you a real `.gsd/` directory (not a symlink) with all milestones, decisions, database, and activity logs — fully git-trackable.
 
 ## What's in the Image
 
@@ -147,7 +166,7 @@ This gives you a real `.gsd/` directory (not a symlink) that can be git-tracked 
 |----------|-------|
 | **Languages** | Node 22, Go 1.24, Rust stable, Python 3 |
 | **AI Agent** | GSD v2 (gsd-pi 2.77.0) |
-| **Cloud CLIs** | gcloud, aws, kubectl, helm, terraform, docker, gh |
+| **Cloud CLIs** | gcloud (+ GKE auth plugin), aws, kubectl, helm, terraform, docker, gh |
 | **Language Servers** | gopls, typescript-language-server, pyright, ruff-lsp, yaml-language-server, bash-language-server, dockerfile-language-server, tailwindcss-language-server, vscode-langservers-extracted |
 | **Go tools** | dlv, goimports, golangci-lint, gofumpt |
 | **Python tools** | uv, poetry, black, ruff, mypy, pytest, pre-commit, ipython |
@@ -155,6 +174,7 @@ This gives you a real `.gsd/` directory (not a symlink) that can be git-tracked 
 | **DB clients** | psql, mysql, redis-cli |
 | **Shell** | Oh My Zsh + autosuggestions + syntax-highlighting |
 | **Editors** | vim, nano |
+| **VS Code** | `vscode-tunnel` command (tunnel to pod from VS Code or browser) |
 
 ## Docker Image Layers
 
@@ -167,10 +187,10 @@ Layer 3: Languages (Go, Rust)           ← changes on version bumps
 Layer 4: Language servers & dev tools   ← changes on LSP upgrades
 Layer 5: GSD + Python tools             ← changes on gsd-pi upgrades
 Layer 6: User, dotfiles, VS Code CLI    ← changes on config tweaks
-Layer 7: entrypoint.sh, connect.sh      ← changes often, rebuilds in seconds
+Layer 7: entrypoint.sh, scripts         ← changes often, rebuilds in seconds
 ```
 
-CI uses BuildKit with registry-backed layer caching. Entrypoint-only changes rebuild in ~30s.
+CI uses GitHub Actions with BuildKit + registry-backed layer caching. Entrypoint-only changes rebuild in ~30s.
 
 ## Upgrading
 
