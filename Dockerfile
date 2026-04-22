@@ -223,7 +223,8 @@ ENV GOPATH=/home/gsd/go
 ENV PATH="/usr/local/go/bin:/home/gsd/go/bin:/home/gsd/.cargo/bin:/home/gsd/.local/bin:/usr/local/bin:${PATH}"
 
 # Pre-install VS Code CLI (code-server bootstraps extensions on first connect)
-RUN curl -fsSL "https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-x64" \
+RUN mkdir -p /home/gsd/.local/bin && \
+    curl -fsSL "https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-x64" \
       -o /tmp/vscode-cli.tar.gz && \
     tar -xzf /tmp/vscode-cli.tar.gz -C /home/gsd/.local/bin && \
     rm /tmp/vscode-cli.tar.gz
