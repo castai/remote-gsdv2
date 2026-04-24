@@ -23,7 +23,7 @@ spec:
     spec:
       terminationGracePeriodSeconds: 30
       securityContext:
-        fsGroup: 1000
+        fsGroup: 1001
       initContainers:
         - name: init
           image: busybox:1.37
@@ -33,7 +33,7 @@ spec:
             - |
               set -e
               # Fix PVC ownership
-              chown -R 1000:1000 /workspace /gsd-home
+              chown -R 1001:1001 /workspace /gsd-home
 
               # Ensure agent dir exists on the PVC
               mkdir -p /gsd-home/agent
@@ -44,14 +44,14 @@ spec:
               {{- if .Values.githubPAT }}
               # Write git credentials to a shared volume
               echo "https://x-access-token:$(cat /secrets/github-pat)@github.com" > /shared/.git-credentials
-              chown 1000:1000 /shared/.git-credentials
+              chown 1001:1001 /shared/.git-credentials
               chmod 644 /shared/.git-credentials
               {{- end }}
 
               {{- if .Values.modelsJSON }}
               # Copy models.json into gsd agent dir on the PVC
               cp /secrets/models.json /gsd-home/agent/models.json
-              chown 1000:1000 /gsd-home/agent/models.json
+              chown 1001:1001 /gsd-home/agent/models.json
               {{- end }}
 
               {{- if .Values.projectEnv }}
