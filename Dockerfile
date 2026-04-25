@@ -203,7 +203,8 @@ RUN pip3 install --break-system-packages --no-cache-dir \
 # LAYER 6: User setup, dotfiles, VS Code server (changes when tweaking config)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-RUN useradd -m -s /bin/zsh gsd && \
+RUN groupadd -g 1000 gsd && \
+    useradd -u 1000 -g 1000 -m -s /bin/zsh gsd && \
     echo "gsd ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/gsd && \
     mkdir -p /workspace /home/gsd/.gsd/agent /home/gsd/go \
              /home/gsd/.ssh /home/gsd/.vscode-server && \
