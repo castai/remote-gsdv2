@@ -1,0 +1,97 @@
+{{- if .Values.rbac.enabled }}
+{{- $fullName := include "gsd-remote.fullname" . -}}
+{{- $namespace := .Values.namespace -}}
+
+# ServiceAccount for the GSD pod
+# Allows the pod to authenticate to the K8s API
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $fullName }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "gsd-remote.labels" . | nindent 4 }}
+
+# ClusterRole with admin-level permissions for GKE cluster management
+# This allows the pod to manage pods, deployments, PVCs, services, etc.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $fullName }}-admin
+  labels:
+    {{- include "gsd-remote.labels" . | nindent 4 }}
+rules:
+  # Core API resources
+  - apiGroups: [""]
+    resources:
+      - pods
+      - pods/log
+      - pods/exec
+      - services
+      - endpoints
+      - persistentvolumeclaims
+      - persistentvolumes
+      - configmaps
+      - secrets
+      - serviceaccounts
+      - namespaces
+    verbs: ["*"]
+  # Apps API
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - daemonsets
+      - replicasets
+      - statefulsets
+    verbs: ["*"]
+  # Batch API (jobs, cronjobs)
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+      - cronjobs
+    verbs: ["*"]
+  # Networking API
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - ingresses
+      - networkpolicies
+    verbs: ["*"]
+  # Storage API
+  - apiGroups: ["storage.k8s.io"]
+    resources:
+      - storageclasses
+    verbs: ["*"]
+  # RBAC API
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources:
+      - roles
+      - rolebindings
+      - clusterroles
+      - clusterrolebindings
+    verbs: ["*"]
+  # Node access (for cluster admin tasks)
+  - apiGroups: [""]
+    resources:
+      - nodes
+    verbs: ["get", "list", "watch"]
+
+# ClusterRoleBinding to bind the ServiceAccount to the ClusterRole
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $fullName }}-admin
+  labels:
+    {{- include "gsd-remote.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $fullName }}
+    namespace: {{ $namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ $fullName }}-admin
+  apiGroup: rbac.authorization.k8s.io
+
+{{- end }}

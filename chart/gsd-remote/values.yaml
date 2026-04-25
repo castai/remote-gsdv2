@@ -76,3 +76,14 @@ persistence:
 # ─── Namespace ───────────────────────────────────────────────────────────────
 
 namespace: gsd-remote
+
+# ─── RBAC (Kubernetes API Access) ────────────────────────────────────────────
+#
+# Enable to grant the pod admin-level cluster access.
+# This allows gsd to manage pods, deployments, PVCs, etc from within the pod.
+#
+# WARNING: Only enable for dev environments. Production workloads should
+# use more restrictive permissions (namespaced Roles instead of ClusterRole).
+#
+rbac:
+  enabled: false  # Set to true to enable cluster admin access

@@ -21,6 +21,9 @@ spec:
       annotations:
         checksum/secrets: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
     spec:
+      {{- if .Values.rbac.enabled }}
+      serviceAccountName: {{ include "gsd-remote.fullname" . }}
+      {{- end }}
       terminationGracePeriodSeconds: 30
       securityContext:
         fsGroup: 1000
