@@ -203,13 +203,16 @@ RUN pip3 install --break-system-packages --no-cache-dir \
 # LAYER 6: User setup, dotfiles, VS Code server (changes when tweaking config)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-RUN groupadd -g 1000 gsd && \
-    useradd -u 1000 -g 1000 -m -s /bin/zsh gsd && \
-    echo "gsd ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/gsd && \
+# Rename the existing 'node' user (UID 1000) to 'gsd' to match init container expectations
+# The node:22-slim base image has UID 1000 assigned to 'node'; we need it to be 'gsd'
+RUN usermod -l gsd node && \
+    groupmod -n gsd node && \
+    usermod -d /home/gsd -m gsd && \
     mkdir -p /workspace /home/gsd/.gsd/agent /home/gsd/go \
              /home/gsd/.ssh /home/gsd/.vscode-server && \
     chown -R gsd:gsd /workspace /home/gsd && \
     chmod 700 /home/gsd/.ssh && \
+    echo "gsd ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/gsd && \
     # Move rust to gsd user
     cp -r /root/.cargo /home/gsd/.cargo && \
     cp -r /root/.rustup /home/gsd/.rustup && \
