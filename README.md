@@ -218,3 +218,4 @@ helm uninstall my-project
 # PVCs are retained — delete manually if you want to wipe the workspace:
 kubectl delete pvc gsd-my-project-workspace gsd-my-project-gsd-home -n gsd-remote
 ```
+# Remote GSD v2
