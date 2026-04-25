@@ -1,0 +1,21 @@
+name: Mirror to KT Financial
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout CAST AI repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history for mirror
+
+      - name: Push to KT Financial
+        run: |
+          git remote add kt-financial https://x-access-token:${{ secrets.KT_FINANCIAL_PAT }}@github.com/KT-Financial/remote-gsdv2.git
+          git push kt-financial main --force
+          echo "✓ Mirrored to KT Financial"
