@@ -29,53 +29,63 @@ spec:
         fsGroup: 1000
       initContainers:
         - name: init
-          image: busybox:1.37
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           command:
             - sh
             - -c
             - |
               set -e
-              # Create directory structure BEFORE chown
-              # (gsd-pi creates ~/.gsd/agent/bin on first run and needs correct ownership)
-              mkdir -p /gsd-home/agent
 
-              # Fix PVC ownership (must include agent dir created above)
-              chown -R 1000:1000 /workspace /gsd-home
+              # ── Seed home directory PVC from image skeleton on first boot ──
+              # The PVC mounts over /home/gsd, hiding image contents.
+              # /home/gsd.skel (baked into the image) has the full home dir snapshot.
+              SENTINEL="/home/gsd/.home-initialized"
+              if [ ! -f "${SENTINEL}" ]; then
+                echo "[init] First boot — seeding /home/gsd from image skeleton..."
+                cp -a /home/gsd.skel/. /home/gsd/
+                touch "${SENTINEL}"
+                echo "[init] ✓ Home directory seeded"
+              else
+                echo "[init] Home directory already initialized, skipping seed"
+              fi
 
-              # Make shared volume accessible
-              chmod 777 /shared
+              # ── Ensure directory structure exists ──
+              mkdir -p /home/gsd/.gsd/agent /home/gsd/.ssh /home/gsd/go
+              chmod 700 /home/gsd/.ssh
+
+              # ── Write secrets to PVC (always overwrite — secret is source of truth) ──
 
               {{- if .Values.githubPAT }}
-              # Write git credentials to a shared volume
-              echo "https://x-access-token:$(cat /secrets/github-pat)@github.com" > /shared/.git-credentials
-              chown 1000:1000 /shared/.git-credentials
-              chmod 644 /shared/.git-credentials
+              echo "https://x-access-token:$(cat /secrets/github-pat)@github.com" > /home/gsd/.git-credentials
+              chmod 600 /home/gsd/.git-credentials
               {{- end }}
 
               {{- if .Values.modelsJSON }}
-              # Copy models.json into gsd agent dir on the PVC
-              cp /secrets/models.json /gsd-home/agent/models.json
-              chown 1000:1000 /gsd-home/agent/models.json
+              cp /secrets/models.json /home/gsd/.gsd/agent/models.json
+              {{- end }}
+
+              {{- if .Values.preferencesMD }}
+              cp /secrets/preferences.md /home/gsd/.gsd/agent/PREFERENCES.md
               {{- end }}
 
               {{- if .Values.projectEnv }}
-              # Stage project .env for entrypoint to copy after clone
-              cp /secrets/project.env /shared/.project-env
-              chown 1000:1000 /shared/.project-env
-              chmod 644 /shared/.project-env
+              # Stage project .env — entrypoint copies it into the workspace after clone.
+              # Can't write directly to workspace target because the repo dir may not exist yet.
+              cp /secrets/project.env /home/gsd/.staged-project-env
               {{- end }}
 
-              echo "init complete"
+              # ── Fix ownership on both PVCs ──
+              chown -R 1000:1000 /home/gsd /workspace
+
+              echo "[init] ✓ init complete"
           volumeMounts:
+            - name: gsd-home
+              mountPath: /home/gsd
             - name: workspace
               mountPath: /workspace
-            - name: gsd-home
-              mountPath: /gsd-home
             - name: secrets
               mountPath: /secrets
               readOnly: true
-            - name: shared
-              mountPath: /shared
       containers:
         - name: gsd
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -107,16 +117,14 @@ spec:
               value: {{ $value | quote }}
             {{- end }}
           volumeMounts:
+            - name: gsd-home
+              mountPath: /home/gsd
             - name: workspace
               mountPath: /workspace
-            - name: gsd-home
-              mountPath: /home/gsd/.gsd
             - name: auth
               mountPath: /home/gsd/.gsd/agent/auth.json
               subPath: auth.json
               readOnly: true
-            - name: shared
-              mountPath: /home/gsd/.shared
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           livenessProbe:
@@ -141,5 +149,3 @@ spec:
             items:
               - key: auth.json
                 path: auth.json
-        - name: shared
-          emptyDir: {}

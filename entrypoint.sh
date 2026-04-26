@@ -2,8 +2,11 @@
 set -uo pipefail
 
 # ─── Remote GSD v2 Entrypoint ───────────────────────────────────────────────
-# Clones the project repo (if not already present), configures git credentials,
-# copies the project .env, then starts a tmux session with zsh.
+# Configures git credentials from the PVC, clones the project repo (if not
+# already present), copies the project .env, then starts a tmux session.
+#
+# /home/gsd is PVC-backed — everything here survives pod restarts.
+# /workspace is PVC-backed — repo clone persists across restarts.
 #
 # Attach: kubectl exec -it <pod> -- tmux attach -t gsd
 # Detach: Ctrl+B, D
@@ -26,19 +29,21 @@ echo "  Detach:  Ctrl+B, D"
 echo "═══════════════════════════════════════════════════════════════"
 
 # ── Git config ───────────────────────────────────────────────────────────────
+# These write to ~/.gitconfig on the PVC — persists across restarts.
 git config --global --get user.email >/dev/null 2>&1 || \
   git config --global user.email "gsd-agent@remote"
 git config --global --get user.name >/dev/null 2>&1 || \
   git config --global user.name "GSD Remote Agent"
 git config --global init.defaultBranch main
-git config --global credential.helper store
 git config --global --add safe.directory '*'
 
-# Pick up credentials from shared volume (written by init container)
-if [ -f /home/gsd/.shared/.git-credentials ]; then
-  cp /home/gsd/.shared/.git-credentials /home/gsd/.git-credentials 2>/dev/null && \
-    chmod 600 /home/gsd/.git-credentials || \
-    echo "[entrypoint] WARN: Could not copy git credentials"
+# Point credential store at ~/.git-credentials (PVC-backed, written by init container)
+if [ -f "${HOME}/.git-credentials" ]; then
+  git config --global credential.helper "store --file=${HOME}/.git-credentials"
+  echo "[entrypoint] ✓ Git credentials loaded from PVC"
+else
+  git config --global credential.helper store
+  echo "[entrypoint] WARN: No git credentials found — clone/push may prompt for auth"
 fi
 
 # ── Clone repo if workspace is empty ─────────────────────────────────────────
@@ -62,16 +67,15 @@ fi
 cd "${WORKSPACE}"
 
 # ── Copy project .env if staged by init container ────────────────────────────
-if [ -f /home/gsd/.shared/.project-env ]; then
+if [ -f "${HOME}/.staged-project-env" ]; then
   echo "[entrypoint] Copying project .env..."
-  cp /home/gsd/.shared/.project-env "${WORKSPACE}/.env"
+  cp "${HOME}/.staged-project-env" "${WORKSPACE}/.env"
   echo "[entrypoint] ✓ .env installed"
 fi
 
 # ── GitHub CLI auth (if PAT available) ───────────────────────────────────────
-if [ -f /home/gsd/.git-credentials ]; then
-  # Extract token from credentials file for gh CLI
-  GH_TOKEN=$(grep -oP 'x-access-token:\K[^@]+' /home/gsd/.git-credentials 2>/dev/null || true)
+if [ -f "${HOME}/.git-credentials" ]; then
+  GH_TOKEN=$(grep -oP 'x-access-token:\K[^@]+' "${HOME}/.git-credentials" 2>/dev/null || true)
   if [ -n "${GH_TOKEN}" ]; then
     echo "[entrypoint] Configuring GitHub CLI..."
     echo "${GH_TOKEN}" | gh auth login --with-token 2>/dev/null || true

@@ -297,6 +297,11 @@ RUN mkdir -p /home/gsd/.vscode-server/data/Machine && \
   }\n\
 }' > /home/gsd/.vscode-server/data/Machine/settings.json
 
+# ── Skeleton snapshot ────────────────────────────────────────────────────────
+# Copy /home/gsd to /home/gsd.skel so the init container can seed the PVC
+# on first boot. The PVC mounts over /home/gsd, hiding the image contents.
+RUN cp -a /home/gsd /home/gsd.skel
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # LAYER 7: Entrypoint + scripts (changes most often — rebuilds in seconds)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -304,9 +309,12 @@ RUN mkdir -p /home/gsd/.vscode-server/data/Machine && \
 ENV NODE_ENV=production
 WORKDIR /workspace
 
-COPY --chown=gsd:gsd entrypoint.sh /home/gsd/entrypoint.sh
-COPY --chown=gsd:gsd connect.sh /home/gsd/connect.sh
+# Entrypoint lives in /opt/gsd (not /home/gsd) because the PVC shadows /home/gsd.
+# The skel snapshot above already captured everything else.
+RUN sudo mkdir -p /opt/gsd && sudo chown gsd:gsd /opt/gsd
+COPY --chown=gsd:gsd entrypoint.sh /opt/gsd/entrypoint.sh
+COPY --chown=gsd:gsd connect.sh /opt/gsd/connect.sh
 COPY --chown=gsd:gsd vscode-tunnel.sh /usr/local/bin/vscode-tunnel
-RUN chmod +x /home/gsd/entrypoint.sh /home/gsd/connect.sh /usr/local/bin/vscode-tunnel
+RUN chmod +x /opt/gsd/entrypoint.sh /opt/gsd/connect.sh /usr/local/bin/vscode-tunnel
 
-ENTRYPOINT ["/home/gsd/entrypoint.sh"]
+ENTRYPOINT ["/opt/gsd/entrypoint.sh"]

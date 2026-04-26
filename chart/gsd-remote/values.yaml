@@ -70,7 +70,7 @@ persistence:
     size: 50Gi
     storageClass: standard-rwo
   gsdHome:
-    size: 10Gi
+    size: 20Gi
     storageClass: standard-rwo
 
 # ─── Namespace ───────────────────────────────────────────────────────────────
