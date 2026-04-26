@@ -14,10 +14,23 @@ Cloud-hosted persistent GSD v2 coding agent on Kubernetes. Your AI dev environme
 │                     │                               │  └──────────────────────┘    │
 └─────────────────────┘                               │                              │
                                                       │  PVC: /workspace (50Gi)     │
-       Disconnect? No problem.                        │  PVC: ~/.gsd (10Gi)         │
+       Disconnect? No problem.                        │  PVC: /home/gsd (20Gi)      │
        Agent keeps coding.                            │  8 CPU / 64GB RAM           │
                                                       └──────────────────────────────┘
 ```
+
+### Persistence Model
+
+Everything that matters lives on PVCs and survives pod restarts:
+
+| Path | Volume | What's there |
+|------|--------|-------------|
+| `/workspace/<project>` | `workspace` PVC (50Gi) | Repo clone, project files |
+| `/home/gsd` | `gsd-home` PVC (20Gi) | Full home dir — `.gsd/`, `.git-credentials`, `.gitconfig`, oh-my-zsh, cargo, rustup, VS Code server state, gh CLI auth |
+
+On **first boot**, the init container seeds `/home/gsd` from a skeleton snapshot baked into the image. On subsequent restarts, the PVC already has everything — only secrets are re-written from the K8s Secret (source of truth).
+
+The entrypoint then clones the repo (if not already present), installs the project `.env`, and configures git/gh credentials from the PVC-backed files.
 
 ## Prerequisites
 
@@ -35,30 +48,48 @@ git clone https://github.com/castai/remote-gsdv2.git
 cd remote-gsdv2
 ```
 
-### 2. Create a values file for your project
+### 2. Create a local secrets file
 
-```yaml
-# my-project.yaml
-projectName: my-project
-gitRepo: "https://github.com/castai/my-project.git"
-```
-
-See `chart/examples/salesanalyzer.yaml` for a full example.
-
-### 3. Deploy
+Secrets are stored locally in `secrets/` (gitignored, never committed):
 
 ```bash
-helm install my-project ./chart/gsd-remote \
-  -f my-project.yaml \
-  --set githubPAT="ghp_..." \
-  --set kimchiToken="your-kimchi-token" \
-  --set tavilyAPIKey="tvly-..." \
-  --set-file modelsJSON=~/.gsd/agent/models.json \
-  --set-file projectEnv=../my-project/.env \
-  --set-file preferencesMD=~/.gsd/preferences.md
+mkdir -p secrets
+
+cat > secrets/my-project.env << 'EOF'
+GITHUB_PAT=github_pat_...
+KIMCHI_TOKEN=your-kimchi-token-here
+EOF
+
+chmod 600 secrets/my-project.env
 ```
 
-### 4. Connect
+### 3. Create a values file for your project
+
+```yaml
+# chart/examples/my-project.yaml
+projectName: my-project
+gitRepo: "https://github.com/org/my-project.git"
+rbac:
+  enabled: true  # only for dev clusters
+```
+
+See `chart/examples/salesanalyzer.yaml` for a reference.
+
+### 4. Deploy
+
+```bash
+# Source secrets and deploy
+source secrets/my-project.env
+
+helm install my-project ./chart/gsd-remote \
+  -f chart/examples/my-project.yaml \
+  --set "githubPAT=${GITHUB_PAT}" \
+  --set "kimchiToken=${KIMCHI_TOKEN}" \
+  --set-file modelsJSON=~/.gsd/agent/models.json \
+  --set-file projectEnv=../my-project/.env
+```
+
+### 5. Connect
 
 ```bash
 # Auto-discover pod, attach to tmux
@@ -74,7 +105,7 @@ helm install my-project ./chart/gsd-remote \
 ./connect.sh --list
 ```
 
-### 5. Start GSD
+### 6. Start GSD
 
 Once attached to the shell:
 
@@ -82,7 +113,7 @@ Once attached to the shell:
 gsd
 ```
 
-### 6. VS Code (optional)
+### 7. VS Code (optional)
 
 From inside the tmux session, run:
 
@@ -93,6 +124,36 @@ vscode-tunnel
 First time requires GitHub device auth — follow the URL it prints. After that, connect from:
 - **VS Code desktop**: Install [Remote - Tunnels](https://marketplace.visualstudio.com/items?itemName=ms-vscode.remote-server) extension → Cmd+Shift+P → Remote-Tunnels: Connect to Tunnel
 - **Browser**: `https://vscode.dev/tunnel/<project-name>`
+
+## Secrets Management
+
+**Never commit secrets.** The `secrets/` directory is gitignored.
+
+```
+secrets/
+  salesanalyzer.env    # GITHUB_PAT, KIMCHI_TOKEN for the salesanalyzer project
+  another-project.env  # separate secrets per project
+```
+
+Each `.env` file contains the helm `--set` values:
+
+```bash
+GITHUB_PAT=github_pat_...
+KIMCHI_TOKEN=04f606...
+```
+
+### GitHub PAT Requirements
+
+The PAT needs access to the repo you're cloning. Fine-grained PATs must explicitly include the target repository.
+
+| Use case | Required scope |
+|----------|---------------|
+| Clone private repo | Contents: Read |
+| Push commits (GSD auto-mode) | Contents: Read & Write |
+| Create issues/PRs | Issues/PRs: Read & Write |
+| Full dev workflow | Contents, Issues, PRs, Workflows: Read & Write |
+
+**Gotcha:** Fine-grained PATs are scoped to specific repos. If the clone fails with `403 Write access to repository not granted`, the PAT doesn't include that repo — edit it at [github.com/settings/personal-access-tokens](https://github.com/settings/personal-access-tokens) and add the repo.
 
 ## connect.sh Reference
 
@@ -128,14 +189,15 @@ Run GSD auto-mode in one session and steer from another:
 | `projectName` | Resource name suffix (e.g. `salesanalyzer` → `gsd-salesanalyzer`) | **Yes** |
 | `gitRepo` | GitHub repo URL to clone on first boot | No |
 | `gitBranch` | Branch to checkout | No |
-| `githubPAT` | GitHub Personal Access Token for git + gh CLI | Recommended |
-| `kimchiToken` | Kimchi / AI Enabler API key (the `aie` provider) | Recommended |
+| `githubPAT` | GitHub PAT for git + gh CLI (store in `secrets/`) | Recommended |
+| `kimchiToken` | Kimchi / AI Enabler API key — the `aie` provider (store in `secrets/`) | Recommended |
 | `tavilyAPIKey` | Tavily search API key | No |
 | `braveAPIKey` | Brave search API key | No |
 | `modelsJSON` | Full `models.json` contents (`--set-file`) | Recommended |
-| `preferencesMD` | GSD `preferences.md` contents (`--set-file`) | No |
+| `preferencesMD` | GSD `PREFERENCES.md` contents (`--set-file`) | No |
 | `projectEnv` | Project `.env` file contents (`--set-file`) | No |
 | `extraEnv` | Additional env vars as key-value map | No |
+| `rbac.enabled` | Grant pod cluster-admin access (dev only) | No |
 | `image.repository` | Container image | Default: Artifact Registry |
 | `image.tag` | Image tag | Default: `latest` |
 | `resources.requests.cpu` | CPU request | Default: `4` |
@@ -143,28 +205,64 @@ Run GSD auto-mode in one session and steer from another:
 | `resources.limits.cpu` | CPU limit | Default: `8` |
 | `resources.limits.memory` | Memory limit | Default: `64Gi` |
 | `persistence.workspace.size` | Workspace PVC size | Default: `50Gi` |
-| `persistence.gsdHome.size` | ~/.gsd PVC size | Default: `10Gi` |
+| `persistence.gsdHome.size` | Home directory PVC size | Default: `20Gi` |
 | `namespace` | Kubernetes namespace | Default: `gsd-remote` |
+
+## Upgrading
+
+```bash
+# Source secrets, then upgrade
+source secrets/my-project.env
+
+helm upgrade my-project ./chart/gsd-remote \
+  -f chart/examples/my-project.yaml \
+  --set "githubPAT=${GITHUB_PAT}" \
+  --set "kimchiToken=${KIMCHI_TOKEN}" \
+  --set-file modelsJSON=~/.gsd/agent/models.json \
+  --set-file projectEnv=../my-project/.env
+```
+
+When secrets or config change, `helm upgrade` recreates the pod (the deployment has a `checksum/secrets` annotation). The home dir PVC persists — only secrets are overwritten by the init container.
+
+When only the Docker image changes (pushed by CI on merge to main):
+
+```bash
+kubectl rollout restart deployment/gsd-my-project -n gsd-remote
+```
+
+### Resetting the Home Directory
+
+If dotfiles or tooling get corrupted on the PVC, delete the sentinel to force a re-seed from the image skeleton on next restart:
+
+```bash
+kubectl exec -n gsd-remote <pod> -- rm /home/gsd/.home-initialized
+kubectl rollout restart deployment/gsd-my-project -n gsd-remote
+```
+
+## Teardown
+
+```bash
+helm uninstall my-project
+
+# PVCs are retained — delete manually to wipe everything:
+kubectl delete pvc gsd-my-project-workspace gsd-my-project-gsd-home -n gsd-remote
+```
 
 ## Migrating an Existing Project
 
-If your local project has a `.gsd` symlink (default GSD behavior), copy the real directory into the remote workspace so it becomes a git-trackable directory:
+If your local project has a `.gsd` symlink (default GSD behavior), copy the real directory into the remote workspace:
 
 ```bash
-# From your local machine
 POD=$(kubectl get pods -n gsd-remote -l gsd/project=<name> -o jsonpath='{.items[0].metadata.name}')
 
-# 1. Copy project .gsd (milestones, decisions, database)
+# Copy project .gsd (milestones, decisions, database)
 GSD_REAL=$(readlink -f /path/to/project/.gsd)
 kubectl cp "${GSD_REAL}/" gsd-remote/"${POD}":/workspace/<name>/.gsd/
 
-# 2. Copy skills, agents, and preferences into the pod's ~/.gsd
+# Copy skills and agents into the pod's ~/.gsd
 kubectl cp ~/.gsd/agent/skills/ gsd-remote/"${POD}":/home/gsd/.gsd/agent/skills/
 kubectl cp ~/.gsd/agent/agents/ gsd-remote/"${POD}":/home/gsd/.gsd/agent/agents/
-kubectl cp ~/.gsd/preferences.md gsd-remote/"${POD}":/home/gsd/.gsd/preferences.md
 ```
-
-This gives you a real `.gsd/` directory (not a symlink) with all milestones, decisions, database, and activity logs — fully git-trackable. Skills and agents are also synced so GSD has the same capabilities as your local setup.
 
 ## What's in the Image
 
@@ -193,29 +291,9 @@ Layer 3: Languages (Go, Rust)           ← changes on version bumps
 Layer 4: Language servers & dev tools   ← changes on LSP upgrades
 Layer 5: GSD + Python tools             ← changes on gsd-pi upgrades
 Layer 6: User, dotfiles, VS Code CLI    ← changes on config tweaks
+       + skeleton snapshot (cp -a /home/gsd → /home/gsd.skel)
 Layer 7: entrypoint.sh, scripts         ← changes often, rebuilds in seconds
+       (lives in /opt/gsd/, not /home/gsd which is PVC-mounted)
 ```
 
 CI uses GitHub Actions with BuildKit + registry-backed layer caching. Entrypoint-only changes rebuild in ~30s.
-
-## Upgrading
-
-```bash
-# Update secrets/config
-helm upgrade my-project ./chart/gsd-remote \
-  -f my-project.yaml \
-  --set githubPAT="..." \
-  --set kimchiToken="..."
-
-# Roll out a new image after a git push (CI builds automatically)
-kubectl rollout restart deployment/gsd-my-project -n gsd-remote
-```
-
-## Teardown
-
-```bash
-helm uninstall my-project
-# PVCs are retained — delete manually if you want to wipe the workspace:
-kubectl delete pvc gsd-my-project-workspace gsd-my-project-gsd-home -n gsd-remote
-```
-# Remote GSD v2
