@@ -13,20 +13,25 @@ Cloud-hosted persistent GSD v2 coding agent on Kubernetes. Your AI dev environme
 │  Browser            │     vscode.dev/tunnel/...     │  │     └─ gsd          │    │
 │                     │                               │  └──────────────────────┘    │
 └─────────────────────┘                               │                              │
-                                                      │  PVC: /workspace (50Gi)     │
-       Disconnect? No problem.                        │  PVC: /home/gsd (20Gi)      │
-       Agent keeps coding.                            │  8 CPU / 64GB RAM           │
+                                                      │  PVC: /home/gsd (50Gi)      │
+       Disconnect? No problem.                        │  8 CPU / 64GB RAM           │
+       Agent keeps coding.                            │                              │
                                                       └──────────────────────────────┘
 ```
 
 ### Persistence Model
 
-Everything that matters lives on PVCs and survives pod restarts:
+Everything lives on a single PVC mounted at `/home/gsd` and survives pod restarts:
 
-| Path | Volume | What's there |
-|------|--------|-------------|
-| `/workspace/<project>` | `workspace` PVC (50Gi) | Repo clone, project files |
-| `/home/gsd` | `gsd-home` PVC (20Gi) | Full home dir — `.gsd/`, `.git-credentials`, `.gitconfig`, oh-my-zsh, cargo, rustup, VS Code server state, gh CLI auth |
+```
+/home/gsd/                 ← PVC (50Gi)
+  .gsd/                    ← GSD agent state, models, auth
+  .git-credentials         ← written by init container from K8s Secret
+  .oh-my-zsh/              ← shell config
+  .cargo/, .rustup/        ← Rust toolchain
+  workspace/
+    salesanalyzer/          ← repo clone + project .env
+```
 
 On **first boot**, the init container seeds `/home/gsd` from a skeleton snapshot baked into the image. On subsequent restarts, the PVC already has everything — only secrets are re-written from the K8s Secret (source of truth).
 
@@ -204,8 +209,8 @@ Run GSD auto-mode in one session and steer from another:
 | `resources.requests.memory` | Memory request | Default: `32Gi` |
 | `resources.limits.cpu` | CPU limit | Default: `8` |
 | `resources.limits.memory` | Memory limit | Default: `64Gi` |
-| `persistence.workspace.size` | Workspace PVC size | Default: `50Gi` |
-| `persistence.gsdHome.size` | Home directory PVC size | Default: `20Gi` |
+| `persistence.size` | PVC size for home + workspace | Default: `50Gi` |
+| `persistence.storageClass` | Storage class | Default: `standard-rwo` |
 | `namespace` | Kubernetes namespace | Default: `gsd-remote` |
 
 ## Upgrading
@@ -244,8 +249,8 @@ kubectl rollout restart deployment/gsd-my-project -n gsd-remote
 ```bash
 helm uninstall my-project
 
-# PVCs are retained — delete manually to wipe everything:
-kubectl delete pvc gsd-my-project-workspace gsd-my-project-gsd-home -n gsd-remote
+# PVC is retained — delete manually to wipe everything:
+kubectl delete pvc gsd-my-project-home -n gsd-remote
 ```
 
 ## Migrating an Existing Project

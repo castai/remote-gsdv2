@@ -12,7 +12,7 @@ set -uo pipefail
 # Detach: Ctrl+B, D
 # ─────────────────────────────────────────────────────────────────────────────
 
-WORKSPACE="${WORKSPACE:-/workspace/project}"
+WORKSPACE="${WORKSPACE:-/home/gsd/workspace/project}"
 GIT_REPO="${GIT_REPO:-}"
 GIT_BRANCH="${GIT_BRANCH:-}"
 PROJECT_NAME="${PROJECT_NAME:-gsd}"

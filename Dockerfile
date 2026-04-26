@@ -208,9 +208,9 @@ RUN pip3 install --break-system-packages --no-cache-dir \
 RUN usermod -l gsd node && \
     groupmod -n gsd node && \
     usermod -d /home/gsd -m gsd && \
-    mkdir -p /workspace /home/gsd/.gsd/agent /home/gsd/go \
-             /home/gsd/.ssh /home/gsd/.vscode-server && \
-    chown -R gsd:gsd /workspace /home/gsd && \
+    mkdir -p /home/gsd/.gsd/agent /home/gsd/go \
+             /home/gsd/.ssh /home/gsd/.vscode-server /home/gsd/workspace && \
+    chown -R gsd:gsd /home/gsd && \
     chmod 700 /home/gsd/.ssh && \
     echo "gsd ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/gsd && \
     # Move rust to gsd user
@@ -247,7 +247,7 @@ RUN sed -i 's/^ZSH_THEME=.*/ZSH_THEME="robbyrussell"/' ~/.zshrc && \
     echo '# GSD Remote Agent' >> ~/.zshrc && \
     echo 'export GOPATH="$HOME/go"' >> ~/.zshrc && \
     echo 'export PATH="/usr/local/go/bin:$GOPATH/bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH"' >> ~/.zshrc && \
-    echo 'export WORKSPACE="${WORKSPACE:-/workspace/dev_root/oc-salesanalyzer-control}"' >> ~/.zshrc && \
+    echo 'export WORKSPACE="${WORKSPACE:-/home/gsd/workspace}"' >> ~/.zshrc && \
     echo '[ -d "$WORKSPACE" ] && cd "$WORKSPACE"' >> ~/.zshrc && \
     echo '' >> ~/.zshrc && \
     echo 'alias k=kubectl' >> ~/.zshrc && \
@@ -307,7 +307,7 @@ RUN sudo cp -a /home/gsd /home/gsd.skel
 # ═══════════════════════════════════════════════════════════════════════════════
 
 ENV NODE_ENV=production
-WORKDIR /workspace
+WORKDIR /home/gsd/workspace
 
 # Entrypoint lives in /opt/gsd (not /home/gsd) because the PVC shadows /home/gsd.
 # The skel snapshot above already captured everything else.

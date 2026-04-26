@@ -66,12 +66,8 @@ resources:
 # ─── Storage ─────────────────────────────────────────────────────────────────
 
 persistence:
-  workspace:
-    size: 50Gi
-    storageClass: standard-rwo
-  gsdHome:
-    size: 20Gi
-    storageClass: standard-rwo
+  size: 50Gi
+  storageClass: standard-rwo
 
 # ─── Namespace ───────────────────────────────────────────────────────────────
 

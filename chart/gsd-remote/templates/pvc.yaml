@@ -1,29 +1,14 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ include "gsd-remote.fullname" . }}-workspace
+  name: {{ include "gsd-remote.fullname" . }}-home
   namespace: {{ .Values.namespace }}
   labels:
     {{- include "gsd-remote.labels" . | nindent 4 }}
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: {{ .Values.persistence.workspace.storageClass }}
+  storageClassName: {{ .Values.persistence.storageClass }}
   resources:
     requests:
-      storage: {{ .Values.persistence.workspace.size }}
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: {{ include "gsd-remote.fullname" . }}-gsd-home
-  namespace: {{ .Values.namespace }}
-  labels:
-    {{- include "gsd-remote.labels" . | nindent 4 }}
-spec:
-  accessModes:
-    - ReadWriteOnce
-  storageClassName: {{ .Values.persistence.gsdHome.storageClass }}
-  resources:
-    requests:
-      storage: {{ .Values.persistence.gsdHome.size }}
+      storage: {{ .Values.persistence.size }}

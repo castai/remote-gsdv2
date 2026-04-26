@@ -52,7 +52,7 @@ spec:
               fi
 
               # ── Ensure directory structure exists ──
-              mkdir -p /home/gsd/.gsd/agent /home/gsd/.ssh /home/gsd/go
+              mkdir -p /home/gsd/.gsd/agent /home/gsd/.ssh /home/gsd/go /home/gsd/workspace
               chmod 700 /home/gsd/.ssh
 
               # ── Write secrets to PVC (always overwrite — secret is source of truth) ──
@@ -72,19 +72,16 @@ spec:
 
               {{- if .Values.projectEnv }}
               # Stage project .env — entrypoint copies it into the workspace after clone.
-              # Can't write directly to workspace target because the repo dir may not exist yet.
               cp /secrets/project.env /home/gsd/.staged-project-env
               {{- end }}
 
-              # ── Fix ownership on both PVCs ──
-              chown -R 1000:1000 /home/gsd /workspace
+              # ── Fix ownership ──
+              chown -R 1000:1000 /home/gsd
 
               echo "[init] ✓ init complete"
           volumeMounts:
-            - name: gsd-home
+            - name: home
               mountPath: /home/gsd
-            - name: workspace
-              mountPath: /workspace
             - name: secrets
               mountPath: /secrets
               readOnly: true
@@ -94,7 +91,7 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
             - name: WORKSPACE
-              value: "/workspace/{{ .Values.projectName }}"
+              value: "/home/gsd/workspace/{{ .Values.projectName }}"
             - name: GIT_REPO
               value: {{ .Values.gitRepo | quote }}
             {{- if .Values.gitBranch }}
@@ -119,10 +116,8 @@ spec:
               value: {{ $value | quote }}
             {{- end }}
           volumeMounts:
-            - name: gsd-home
+            - name: home
               mountPath: /home/gsd
-            - name: workspace
-              mountPath: /workspace
             - name: auth
               mountPath: /home/gsd/.gsd/agent/auth.json
               subPath: auth.json
@@ -136,12 +131,9 @@ spec:
             periodSeconds: 30
             failureThreshold: 5
       volumes:
-        - name: workspace
+        - name: home
           persistentVolumeClaim:
-            claimName: {{ $fullName }}-workspace
-        - name: gsd-home
-          persistentVolumeClaim:
-            claimName: {{ $fullName }}-gsd-home
+            claimName: {{ $fullName }}-home
         - name: secrets
           secret:
             secretName: {{ $fullName }}-secrets
