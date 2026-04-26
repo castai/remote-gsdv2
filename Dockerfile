@@ -300,7 +300,7 @@ RUN mkdir -p /home/gsd/.vscode-server/data/Machine && \
 # ── Skeleton snapshot ────────────────────────────────────────────────────────
 # Copy /home/gsd to /home/gsd.skel so the init container can seed the PVC
 # on first boot. The PVC mounts over /home/gsd, hiding the image contents.
-RUN cp -a /home/gsd /home/gsd.skel
+RUN sudo cp -a /home/gsd /home/gsd.skel
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # LAYER 7: Entrypoint + scripts (changes most often — rebuilds in seconds)
