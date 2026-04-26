@@ -262,7 +262,7 @@ POD=$(kubectl get pods -n gsd-remote -l gsd/project=<name> -o jsonpath='{.items[
 
 # Copy project .gsd (milestones, decisions, database)
 GSD_REAL=$(readlink -f /path/to/project/.gsd)
-kubectl cp "${GSD_REAL}/" gsd-remote/"${POD}":/workspace/<name>/.gsd/
+kubectl cp "${GSD_REAL}/" gsd-remote/"${POD}":/home/gsd/workspace/<name>/.gsd/
 
 # Copy skills and agents into the pod's ~/.gsd
 kubectl cp ~/.gsd/agent/skills/ gsd-remote/"${POD}":/home/gsd/.gsd/agent/skills/
