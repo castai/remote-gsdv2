@@ -30,6 +30,8 @@ spec:
       initContainers:
         - name: init
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          securityContext:
+            runAsUser: 0
           command:
             - sh
             - -c
