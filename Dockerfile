@@ -258,11 +258,26 @@ RUN sed -i 's/^ZSH_THEME=.*/ZSH_THEME="robbyrussell"/' ~/.zshrc && \
 
 # .tmux.conf — compatible with tmux 3.3a (Debian bookworm)
 RUN printf '%s\n' \
-    'set -g default-terminal "xterm-256color"' \
-    'set -ga terminal-overrides ",xterm-256color:Tc"' \
+    'set -g default-terminal "tmux-256color"' \
+    'set -ga terminal-overrides ",xterm-256color:Tc,*256col*:Tc"' \
     'set -g default-shell /bin/zsh' \
     'set -g mouse on' \
     'set -g history-limit 50000' \
+    '' \
+    '# Bracketed paste — pass through to inner apps so multi-line pastes' \
+    '# arrive as one chunk instead of a stream of Enter keypresses.' \
+    '# Disable assume-paste-time (default 1ms) so tmux does not flatten the' \
+    '# bracketed-paste sequence into individual key events when running' \
+    '# under kubectl exec / iTerm2 tmux -CC where input timing is jittery.' \
+    'set -g assume-paste-time 0' \
+    'set -as terminal-features ",*:bpaste"' \
+    'set -as terminal-features ",xterm*:bpaste"' \
+    'set -as terminal-features ",tmux*:bpaste"' \
+    '' \
+    '# Extended keys + xterm key sequences for modifiers in modern apps' \
+    'set -s extended-keys on' \
+    'set -as terminal-features ",*:extkeys"' \
+    'setw -g xterm-keys on' \
     '' \
     '# Clipboard: OSC 52 propagates copies to local clipboard' \
     '# Works over kubectl exec with iTerm2, Kitty, Alacritty, WezTerm' \

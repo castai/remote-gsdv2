@@ -82,6 +82,31 @@ if [ -f "${HOME}/.git-credentials" ]; then
   fi
 fi
 
+# ── Refresh shell config from image skeleton ────────────────────────────────
+# .tmux.conf and .zshrc are baked into the image via /home/gsd.skel but
+# the PVC seed only happens on first boot. Refresh them every boot so config
+# fixes (e.g. tmux paste handling) roll out without a nuke. User-edited
+# versions are preserved if they have a `# gsd-keep` marker on line 1.
+for cfg in .tmux.conf; do
+  src="/home/gsd.skel/${cfg}"
+  dst="${HOME}/${cfg}"
+  if [ -f "${src}" ]; then
+    if [ -f "${dst}" ] && head -n 1 "${dst}" | grep -q '^# gsd-keep'; then
+      echo "[entrypoint] Keeping user-customized ${cfg} (gsd-keep marker)"
+    elif ! cmp -s "${src}" "${dst}" 2>/dev/null; then
+      cp "${src}" "${dst}"
+      echo "[entrypoint] ✓ Refreshed ${cfg} from image"
+    fi
+  fi
+done
+
+# Reload running tmux server config so the refresh takes effect for any
+# already-attached session without forcing a detach/reattach.
+if tmux has-session -t "${TMUX_SESSION}" 2>/dev/null; then
+  tmux source-file "${HOME}/.tmux.conf" 2>/dev/null && \
+    echo "[entrypoint] ✓ Reloaded tmux config in running session"
+fi
+
 # ── Start tmux session ──────────────────────────────────────────────────────
 if tmux has-session -t "${TMUX_SESSION}" 2>/dev/null; then
   echo "[entrypoint] Existing tmux session found. Keeping it alive."
