@@ -182,7 +182,7 @@ RUN npm install -g \
 # LAYER 5: GSD + Python tools (changes when upgrading gsd-pi or Python deps)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-RUN npm install -g gsd-pi@2.77.0
+RUN npm install -g gsd-pi@2.78.1
 
 RUN pip3 install --break-system-packages --no-cache-dir \
     pipx \
