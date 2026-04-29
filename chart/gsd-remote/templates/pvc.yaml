@@ -5,6 +5,11 @@ metadata:
   namespace: {{ .Values.namespace }}
   labels:
     {{- include "gsd-remote.labels" . | nindent 4 }}
+  annotations:
+    # Survive `helm uninstall` — the home directory holds session state, models,
+    # auth, oh-my-zsh, cargo/rustup, the cloned repo, and .gsd/ artifacts.
+    # Use the deploy script's `nuke` subcommand to delete the PVC explicitly.
+    helm.sh/resource-policy: keep
 spec:
   accessModes:
     - ReadWriteOnce

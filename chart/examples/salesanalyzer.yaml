@@ -1,13 +1,18 @@
 # ─── Example: Sales Analyzer Control ─────────────────────────────────────────
 # Deploy with:
+#   kubectl create namespace lk-gsd 2>/dev/null || true
 #   helm install salesanalyzer ./chart/gsd-remote \
 #     -f chart/examples/salesanalyzer.yaml \
+#     --namespace lk-gsd \
 #     --set-file modelsJSON=~/.gsd/agent/models.json \
 #     --set-file projectEnv=../oc_salesanalyzer_control/.env
 # ─────────────────────────────────────────────────────────────────────────────
 
 projectName: salesanalyzer
 gitRepo: "https://github.com/castai/oc-salesanalyzer-control.git"
+
+rbac:
+  enabled: true
 
 # Secrets — override via --set or a separate secrets file (don't commit!)
 # githubPAT: "ghp_..."

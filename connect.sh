@@ -12,7 +12,7 @@ set -euo pipefail
 #   ./connect.sh --list                   # show status without attaching
 # ─────────────────────────────────────────────────────────────────────────────
 
-NAMESPACE="${GSD_NAMESPACE:-gsd-remote}"
+NAMESPACE="${GSD_NAMESPACE:-lk-gsd}"
 PROJECT=""
 ITERM_MODE=false
 LIST_MODE=false
@@ -35,7 +35,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --new <name>          Create and attach a new tmux session (e.g. steering)"
       echo "  --list, -l            List pods and tmux sessions without attaching"
       echo "  --iterm               Use iTerm2 native tmux integration (tmux -CC)"
-      echo "  --namespace, -n <ns>  K8s namespace (default: gsd-remote)"
+      echo "  --namespace, -n <ns>  K8s namespace (default: lk-gsd, override with GSD_NAMESPACE env var)"
       echo ""
       echo "Examples:"
       echo "  ./connect.sh                          # attach to existing session"

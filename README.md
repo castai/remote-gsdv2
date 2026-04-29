@@ -86,8 +86,13 @@ See `chart/examples/salesanalyzer.yaml` for a reference.
 # Source secrets and deploy
 source secrets/my-project.env
 
+# Namespace is intentionally NOT helm-managed — bootstrap it once.
+# This is what makes `helm uninstall` safe (it can't cascade-delete the PVC).
+kubectl create namespace lk-gsd 2>/dev/null || true
+
 helm install my-project ./chart/gsd-remote \
   -f chart/examples/my-project.yaml \
+  --namespace lk-gsd \
   --set "githubPAT=${GITHUB_PAT}" \
   --set "kimchiToken=${KIMCHI_TOKEN}" \
   --set-file modelsJSON=~/.gsd/agent/models.json \
@@ -173,7 +178,7 @@ The PAT needs access to the repo you're cloning. Fine-grained PATs must explicit
 | `--project, -p <name>` | Connect to a specific project by name |
 | `--new <name>` | Create a new tmux session and attach (e.g. `--new steering`) |
 | `--list, -l` | Show pods, tmux sessions, and VS Code tunnel status |
-| `--namespace, -n <ns>` | Kubernetes namespace (default: `gsd-remote`) |
+| `--namespace, -n <ns>` | Kubernetes namespace (default: `lk-gsd`) |
 
 ### Multiple Sessions
 
@@ -211,7 +216,7 @@ Run GSD auto-mode in one session and steer from another:
 | `resources.limits.memory` | Memory limit | Default: `64Gi` |
 | `persistence.size` | PVC size for home + workspace | Default: `50Gi` |
 | `persistence.storageClass` | Storage class | Default: `standard-rwo` |
-| `namespace` | Kubernetes namespace | Default: `gsd-remote` |
+| `namespace` | Kubernetes namespace | Default: `lk-gsd` |
 
 ## Upgrading
 
@@ -232,7 +237,7 @@ When secrets or config change, `helm upgrade` recreates the pod (the deployment 
 When only the Docker image changes (pushed by CI on merge to main):
 
 ```bash
-kubectl rollout restart deployment/gsd-my-project -n gsd-remote
+kubectl rollout restart deployment/gsd-my-project -n lk-gsd
 ```
 
 ### Resetting the Home Directory
@@ -240,17 +245,34 @@ kubectl rollout restart deployment/gsd-my-project -n gsd-remote
 If dotfiles or tooling get corrupted on the PVC, delete the sentinel to force a re-seed from the image skeleton on next restart:
 
 ```bash
-kubectl exec -n gsd-remote <pod> -- rm /home/gsd/.home-initialized
-kubectl rollout restart deployment/gsd-my-project -n gsd-remote
+kubectl exec -n lk-gsd <pod> -- rm /home/gsd/.home-initialized
+kubectl rollout restart deployment/gsd-my-project -n lk-gsd
 ```
 
-## Teardown
+## Lifecycle: stop, restart, destroy
+
+The chart is structured so `helm uninstall` is **safe** — it removes the workload but preserves your home directory. The namespace is bootstrapped outside helm and the PVC carries `helm.sh/resource-policy: keep`, so neither is touched by an uninstall. Data destruction requires an explicit `nuke`.
 
 ```bash
-helm uninstall my-project
+# Stop the agent — keeps PVC, namespace, and /home/gsd intact.
+# Re-running `up` reattaches the same disk and you're back where you left off.
+./deploy-salesanalyzer.sh down
 
-# PVC is retained — delete manually to wipe everything:
-kubectl delete pvc gsd-my-project-home -n gsd-remote
+# Bring it back later
+./deploy-salesanalyzer.sh up
+
+# Show current state
+./deploy-salesanalyzer.sh status
+
+# Permanently destroy (deletes PVC, GCE disk, namespace).
+# Requires typing the project name to confirm.
+./deploy-salesanalyzer.sh nuke
+```
+
+If you ever uninstall directly with `helm uninstall my-project -n lk-gsd`, the PVC and namespace still survive. To wipe data after a manual uninstall:
+
+```bash
+kubectl delete pvc gsd-my-project-home -n lk-gsd
 ```
 
 ## Migrating an Existing Project
@@ -258,15 +280,15 @@ kubectl delete pvc gsd-my-project-home -n gsd-remote
 If your local project has a `.gsd` symlink (default GSD behavior), copy the real directory into the remote workspace:
 
 ```bash
-POD=$(kubectl get pods -n gsd-remote -l gsd/project=<name> -o jsonpath='{.items[0].metadata.name}')
+POD=$(kubectl get pods -n lk-gsd -l gsd/project=<name> -o jsonpath='{.items[0].metadata.name}')
 
 # Copy project .gsd (milestones, decisions, database)
 GSD_REAL=$(readlink -f /path/to/project/.gsd)
-kubectl cp "${GSD_REAL}/" gsd-remote/"${POD}":/home/gsd/workspace/<name>/.gsd/
+kubectl cp "${GSD_REAL}/" lk-gsd/"${POD}":/home/gsd/workspace/<name>/.gsd/
 
 # Copy skills and agents into the pod's ~/.gsd
-kubectl cp ~/.gsd/agent/skills/ gsd-remote/"${POD}":/home/gsd/.gsd/agent/skills/
-kubectl cp ~/.gsd/agent/agents/ gsd-remote/"${POD}":/home/gsd/.gsd/agent/agents/
+kubectl cp ~/.gsd/agent/skills/ lk-gsd/"${POD}":/home/gsd/.gsd/agent/skills/
+kubectl cp ~/.gsd/agent/agents/ lk-gsd/"${POD}":/home/gsd/.gsd/agent/agents/
 ```
 
 ## What's in the Image

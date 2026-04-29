@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: gsd-agent
-  namespace: gsd-remote
+  namespace: lk-gsd
   labels:
     app: gsd-agent
 spec:

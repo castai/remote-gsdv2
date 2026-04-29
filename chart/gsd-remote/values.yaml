@@ -70,8 +70,17 @@ persistence:
   storageClass: standard-rwo
 
 # ─── Namespace ───────────────────────────────────────────────────────────────
+#
+# The namespace is NOT managed by this chart — it must exist before install.
+# This is intentional: helm-owned namespaces get cascade-deleted by `helm uninstall`,
+# which destroys PVCs in the namespace and any data on them. Keeping the namespace
+# out of the chart means `helm uninstall` only removes the workload, not the data.
+#
+# Bootstrap once with: kubectl create namespace lk-gsd
+# Or use --create-namespace on first `helm install` (helm will create but not own it
+# in newer versions; for safety the deploy script handles this explicitly).
 
-namespace: gsd-remote
+namespace: lk-gsd
 
 # ─── RBAC (Kubernetes API Access) ────────────────────────────────────────────
 #
