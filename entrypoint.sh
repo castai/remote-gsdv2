@@ -100,6 +100,22 @@ for cfg in .tmux.conf; do
   fi
 done
 
+# ── Refresh VS Code CLI binary from image ───────────────────────────────────
+# The CLI is baked in the image and must survive PVC shadowing.  Unlike config
+# files, it won't be seeded by the init container (which only copies /home/gsd.skel).
+# Refresh on every boot so a new image (correct glibc build) replaces an old
+# one (Alpine/musl build) without needing a PVC wipe.
+CLI_SRC="/home/gsd.skel/.local/bin/code"
+CLI_DST="${HOME}/.local/bin/code"
+if [ -f "${CLI_SRC}" ]; then
+  if [ -f "${CLI_DST}" ] && cmp -s "${CLI_SRC}" "${CLI_DST}" 2>/dev/null; then
+    : # already identical
+  else
+    cp "${CLI_SRC}" "${CLI_DST}"
+    echo "[entrypoint] ✓ Refreshed VS Code CLI from image ($(file -b ${CLI_DST} | cut -d, -f1))"
+  fi
+fi
+
 # Reload running tmux server config so the refresh takes effect for any
 # already-attached session without forcing a detach/reattach.
 if tmux has-session -t "${TMUX_SESSION}" 2>/dev/null; then
