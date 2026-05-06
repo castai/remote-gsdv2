@@ -288,6 +288,12 @@ RUN printf '%s\n' \
     'bind -T copy-mode-vi v send-keys -X begin-selection' \
     'bind -T copy-mode-vi y send-keys -X copy-pipe-and-cancel' \
     '' \
+    '# Re-enable bracketed paste on every client attach.' \
+    '# iTerm2 tmux -CC loses bracketed-paste state on reconnect and reverts' \
+    '# to raw paste (each newline fires as Enter). Sending \e[?2004h on attach' \
+    '# restores it without requiring a pod restart or config reload.' \
+    'set-hook -g client-attached "run-shell \"tmux send-keys -t= '"'"'\\033[?2004h'"'"'\""' \
+    '' \
     '# Status bar' \
     'set -g status-style "bg=#1e1e2e,fg=#cdd6f4"' \
     'set -g status-left "#[fg=#89b4fa,bold] GSD #[fg=#6c7086]| "' \
