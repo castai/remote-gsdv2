@@ -1,0 +1,15 @@
+[
+  {
+    "name": "salesanalyzer",
+    "pod": "gsd-salesanalyzer-7cc96c56f8-j4j9p",
+    "namespace": "lk-gsd",
+    "gsdPath": "/home/gsd/workspace/salesanalyzer/.gsd",
+    "vscodeTunnelUrl": "https://vscode.dev/tunnel/salesanalyzer",
+    "tmuxSession": "gsd"
+  },
+  {
+    "name": "remote_gsdv2",
+    "localPath": "/Users/leonkuperman/LKDev/CAST/remote_gsdv2/.gsd",
+    "tmuxSession": "gsd"
+  }
+]

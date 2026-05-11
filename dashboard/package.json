@@ -1,0 +1,16 @@
+{
+  "name": "gsd-control-plane",
+  "version": "0.1.0",
+  "description": "GSD Control Plane — browser POC for remote GSD instance visibility",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "node-pty": "^1.1.0",
+    "ws": "^8.20.0"
+  }
+}
