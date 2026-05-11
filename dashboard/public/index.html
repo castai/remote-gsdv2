@@ -444,11 +444,9 @@
       font-size: 13px;
       padding: 0 2px;
       flex-shrink: 0;
-      opacity: 0;
-      transition: color 0.15s, opacity 0.15s;
+      transition: color 0.15s;
     }
 
-    .inst-node-header:hover .inst-delete-btn { opacity: 1; }
     .inst-delete-btn:hover { color: var(--errored); }
 
     .inst-sessions {
@@ -1339,7 +1337,14 @@ document.addEventListener('keydown', e => {
 
 // ── Instance filter dropdown ──────────────────────────────────────────────────
 
-const hiddenInstances = new Set()
+const FILTER_KEY      = 'gsd-cp-hidden-instances'
+const hiddenInstances = new Set(
+  (() => { try { return JSON.parse(localStorage.getItem(FILTER_KEY) || '[]') } catch { return [] } })()
+)
+
+function persistFilter() {
+  try { localStorage.setItem(FILTER_KEY, JSON.stringify([...hiddenInstances])) } catch {}
+}
 let _filterInstances  = []  // last known instance list
 
 function toggleInstFilter(e) {
@@ -1379,6 +1384,7 @@ function renderInstanceFilter(instances) {
     } else {
       hiddenInstances.clear()
     }
+    persistFilter()
     renderInstanceFilter(instances)
     if (currentData) render(currentData)
   })
@@ -1404,6 +1410,7 @@ function renderInstanceFilter(instances) {
       } else {
         hiddenInstances.delete(inst.name)
       }
+      persistFilter()
       renderInstanceFilter(instances)
       if (currentData) render(currentData)
     })

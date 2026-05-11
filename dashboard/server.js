@@ -57,7 +57,8 @@ function listTmuxSessions(cfg) {
     let out
     if (cfg.pod) {
       out = execFileSync(KUBECTL, [
-        'exec', cfg.pod, '-n', cfg.namespace ?? 'lk-gsd', '--',
+        'exec', cfg.pod, '-n', cfg.namespace ?? 'lk-gsd',
+        '-c', cfg.container ?? 'gsd', '--',
         'tmux', 'list-sessions', '-F', fmt
       ], { encoding: 'utf8', timeout: 5000 })
     } else {
@@ -115,7 +116,10 @@ function ensureTtyd(cfg) {
   console.log(`[ttyd] local ${cfg.name} → localhost:${port}`)
   const shell = process.env.SHELL || '/bin/zsh'
   const proc  = spawn(TTYD, [
-    '-p', String(port), '-W', shell
+    '-p', String(port), '-W',
+    '-t', `fontSize=${terminalPrefs.fontSize}`,
+    '-t', `fontFamily=${terminalPrefs.fontFamily}`,
+    shell
   ], { stdio: 'pipe', cwd: workDir })
 
   proc.stderr?.on('data', d => {
@@ -262,11 +266,70 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: instances.every(i => i.ok), instances })
 })
 
+// ─── Terminal preferences ─────────────────────────────────────────────────────
+// Stored in memory; persisted to terminal-prefs.json alongside instances.json
+
+const PREFS_FILE = resolve(__dir, 'terminal-prefs.json')
+
+function loadPrefs() {
+  try {
+    if (existsSync(PREFS_FILE)) return JSON.parse(readFileSync(PREFS_FILE, 'utf8'))
+  } catch {}
+  return {}
+}
+
+function savePrefs() {
+  writeFileSync(PREFS_FILE, JSON.stringify(terminalPrefs, null, 2) + '\n')
+}
+
+const terminalPrefs = loadPrefs()
+// Defaults
+if (!terminalPrefs.fontSize)   terminalPrefs.fontSize   = 14
+if (!terminalPrefs.fontFamily) terminalPrefs.fontFamily = 'Menlo, monospace'
+
 /**
- * GET /api/terminal/:name
- * Returns { sessions, defaultSession, port, type }
- * Starts ttyd/port-forward on demand.
+ * GET /api/terminal-prefs
+ * Returns current terminal preferences.
  */
+app.get('/api/terminal-prefs', (req, res) => {
+  res.json(terminalPrefs)
+})
+
+/**
+ * POST /api/terminal-prefs
+ * Body: { fontSize?, fontFamily? }
+ * Updates prefs, restarts affected ttyd processes, saves to disk.
+ */
+app.post('/api/terminal-prefs', (req, res) => {
+  const { fontSize, fontFamily } = req.body ?? {}
+  let changed = false
+
+  if (fontSize && Number.isInteger(fontSize) && fontSize >= 8 && fontSize <= 32) {
+    terminalPrefs.fontSize = fontSize
+    changed = true
+  }
+  if (fontFamily && typeof fontFamily === 'string') {
+    terminalPrefs.fontFamily = fontFamily
+    changed = true
+  }
+
+  if (!changed) return res.status(400).json({ error: 'no valid fields' })
+
+  savePrefs()
+
+  // Restart all running ttyd processes so new prefs take effect
+  for (const [name, entry] of ttydProcs.entries()) {
+    const cfg = instanceConfigs.find(i => i.name === name)
+    if (!cfg || cfg.pod) continue  // pod ttyd not managed by us
+    try { entry.proc.kill() } catch {}
+    ttydProcs.delete(name)
+    console.log(`[ttyd] restarted ${name} with new prefs`)
+  }
+
+  res.json({ ok: true, prefs: terminalPrefs })
+})
+
+
 app.get('/api/terminal/:name', (req, res) => {
   const cfg = instanceConfigs.find(i => i.name === req.params.name)
   if (!cfg) return res.status(404).json({ error: 'instance not found' })
@@ -283,7 +346,7 @@ app.get('/api/terminal/:name', (req, res) => {
   }
 
   // Give port-forward a moment to bind before browser connects
-  setTimeout(() => res.json({ sessions, defaultSession, port, type }), cfg.pod ? 400 : 100)
+  setTimeout(() => res.json({ sessions, defaultSession, port, type, prefs: terminalPrefs }), cfg.pod ? 400 : 100)
 })
 
 /**
@@ -303,9 +366,10 @@ app.post('/api/terminal/:name/session', (req, res) => {
   try {
     if (cfg.pod) {
       const ns      = cfg.namespace ?? 'lk-gsd'
+      const ctr     = cfg.container ?? 'gsd'
       const workDir = cfg.gsdPath ? cfg.gsdPath.replace('/.gsd', '') : '/home/gsd/workspace'
       execFileSync(KUBECTL, [
-        'exec', cfg.pod, '-n', ns, '--',
+        'exec', cfg.pod, '-n', ns, '-c', ctr, '--',
         'tmux', 'new-session', '-d', '-s', sessionName, '-c', workDir
       ], { encoding: 'utf8', timeout: 8000 })
     } else {
@@ -346,9 +410,11 @@ app.get('/terminal-page/:name', (req, res) => {
     ? `http://localhost:${port}/`
     : `http://localhost:${port}/?arg=${encodeURIComponent(sessionName)}`
 
-  const title = `${cfg.name} — ${sessionName}`
+  const title    = `${cfg.name} — ${sessionName}`
+  const instName = cfg.name
+  const fontSize  = terminalPrefs.fontSize
+  const fontFam   = terminalPrefs.fontFamily
 
-  // Serve a minimal HTML page that is just a full-screen ttyd iframe
   setTimeout(() => {
     res.send(`<!DOCTYPE html>
 <html>
@@ -357,27 +423,106 @@ app.get('/terminal-page/:name', (req, res) => {
   <title>${title}</title>
   <style>
     * { margin:0; padding:0; box-sizing:border-box }
-    html, body { height:100%; background:#0d1117; overflow:hidden }
+    html, body { height:100%; background:#0d1117; overflow:hidden; display:flex; flex-direction:column }
     #bar {
-      height: 32px; display:flex; align-items:center; gap:10px;
-      padding: 0 14px; background:#161b22;
-      border-bottom: 1px solid #2e3349; flex-shrink:0;
+      height:36px; display:flex; align-items:center; gap:10px;
+      padding:0 14px; background:#161b22;
+      border-bottom:1px solid #2e3349; flex-shrink:0;
     }
-    #bar-dot { width:8px; height:8px; border-radius:50%; background:#22c55e; }
+    #bar-dot { width:8px; height:8px; border-radius:50%; background:#22c55e; flex-shrink:0 }
     #bar-title { font-family:-apple-system,sans-serif; font-size:12px; color:#e2e8f0; font-weight:500 }
     #bar-session { font-family:'SF Mono','Fira Code',monospace; font-size:11px;
       color:#22c55e; background:#0a2a1e; border-radius:4px; padding:1px 7px }
-    body { display:flex; flex-direction:column }
+    #bar-spacer { flex:1 }
+    #settings-btn {
+      background:none; border:1px solid #2e3349; border-radius:4px;
+      color:#64748b; font-size:13px; padding:3px 8px; cursor:pointer;
+      transition:border-color .15s, color .15s;
+    }
+    #settings-btn:hover { border-color:#6366f1; color:#e2e8f0 }
+    #settings-panel {
+      display:none; position:absolute; top:40px; right:12px;
+      background:#1a1d27; border:1px solid #2e3349; border-radius:8px;
+      padding:16px; width:260px; z-index:100;
+      box-shadow:0 8px 24px rgba(0,0,0,.5);
+    }
+    #settings-panel.open { display:block }
+    .sp-title { font-size:11px; font-weight:600; color:#64748b;
+      letter-spacing:.06em; text-transform:uppercase; margin-bottom:12px }
+    .sp-row { display:flex; align-items:center; gap:10px; margin-bottom:10px }
+    .sp-label { font-size:12px; color:#e2e8f0; min-width:80px }
+    .sp-input {
+      flex:1; background:#22263a; border:1px solid #2e3349; border-radius:4px;
+      color:#e2e8f0; font-size:12px; padding:4px 8px; outline:none;
+      transition:border-color .15s;
+    }
+    .sp-input:focus { border-color:#6366f1 }
+    .sp-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:4px }
+    .sp-apply {
+      background:#6366f1; border:none; border-radius:4px;
+      color:#fff; font-size:12px; font-weight:500; padding:5px 12px; cursor:pointer;
+    }
+    .sp-apply:hover { opacity:.85 }
+    .sp-cancel {
+      background:none; border:1px solid #2e3349; border-radius:4px;
+      color:#64748b; font-size:12px; padding:5px 12px; cursor:pointer;
+    }
     iframe { flex:1; border:none; width:100% }
   </style>
 </head>
 <body>
   <div id="bar">
     <span id="bar-dot"></span>
-    <span id="bar-title">${cfg.name}</span>
+    <span id="bar-title">${instName}</span>
     <span id="bar-session">${sessionName}</span>
+    <span id="bar-spacer"></span>
+    <button id="settings-btn" onclick="toggleSettings(event)" title="Terminal settings">⚙</button>
   </div>
-  <iframe src="${ttydUrl}" allow="clipboard-read; clipboard-write"></iframe>
+  <div id="settings-panel">
+    <div class="sp-title">Terminal settings</div>
+    <div class="sp-row">
+      <span class="sp-label">Font size</span>
+      <input class="sp-input" id="sp-fontsize" type="number" min="8" max="32" value="${fontSize}"/>
+    </div>
+    <div class="sp-row">
+      <span class="sp-label">Font family</span>
+      <input class="sp-input" id="sp-fontfamily" type="text" value="${fontFam}"/>
+    </div>
+    <div class="sp-actions">
+      <button class="sp-cancel" onclick="closeSettings()">Cancel</button>
+      <button class="sp-apply" onclick="applySettings()">Apply &amp; restart</button>
+    </div>
+  </div>
+  <iframe id="ttyd-frame" src="${ttydUrl}" allow="clipboard-read; clipboard-write"></iframe>
+  <script>
+    function toggleSettings(e) {
+      e.stopPropagation()
+      document.getElementById('settings-panel').classList.toggle('open')
+    }
+    function closeSettings() {
+      document.getElementById('settings-panel').classList.remove('open')
+    }
+    document.addEventListener('click', closeSettings)
+    document.getElementById('settings-panel').addEventListener('click', e => e.stopPropagation())
+
+    async function applySettings() {
+      const fontSize   = parseInt(document.getElementById('sp-fontsize').value)
+      const fontFamily = document.getElementById('sp-fontfamily').value.trim()
+      if (!fontSize || fontSize < 8 || fontSize > 32) {
+        alert('Font size must be 8–32'); return
+      }
+      const res  = await fetch('/api/terminal-prefs', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ fontSize, fontFamily })
+      })
+      const data = await res.json()
+      if (!res.ok) { alert(data.error); return }
+      closeSettings()
+      // Reload the iframe so ttyd restarts with new font
+      const frame = document.getElementById('ttyd-frame')
+      frame.src = frame.src
+    }
+  </script>
 </body>
 </html>`)
   }, cfg.pod ? 500 : 100)

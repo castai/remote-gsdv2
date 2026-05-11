@@ -180,7 +180,7 @@ print(json.dumps(result))
  * @returns {Promise<object>} Normalised state payload, or { error, stale:true }
  */
 export async function readInstance(config) {
-  const { name, pod, namespace = 'lk-gsd', gsdPath, localPath } = config
+  const { name, pod, namespace = 'lk-gsd', gsdPath, localPath, container = 'gsd' } = config
   const start = Date.now()
 
   let cmd, args, env
@@ -189,7 +189,7 @@ export async function readInstance(config) {
     const resolvedGsdPath = gsdPath || ''
     cmd  = 'kubectl'
     args = [
-      'exec', pod, '-n', namespace, '--',
+      'exec', pod, '-n', namespace, '-c', container, '--',
       'env', `GSD_PATH=${resolvedGsdPath}`,
       'python3', '-c', PYTHON_SCRIPT
     ]
