@@ -354,12 +354,166 @@
       flex: 1;
       overflow: hidden;
       position: relative;
+      display: flex;
     }
 
-    /* ── Board view ───────────────────────────────────────────── */
+    /* ── Instance sidebar ─────────────────────────────────────── */
+    #instance-sidebar {
+      width: 220px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      border-right: 2px solid var(--border);
+      background: var(--surface);
+      overflow-y: auto;
+    }
+
+    .sidebar-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px 8px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .sidebar-header-title {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .sidebar-add-btn {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--muted);
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 7px;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    .sidebar-add-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    .inst-node {
+      border-bottom: 1px solid var(--border);
+    }
+
+    .inst-node-header {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 9px 12px 7px;
+      cursor: default;
+    }
+
+    .inst-node-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .inst-node-name {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .inst-node-type {
+      font-size: 9px;
+      color: var(--muted);
+      background: var(--surface2);
+      border-radius: 3px;
+      padding: 1px 5px;
+      flex-shrink: 0;
+    }
+
+    .inst-delete-btn {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 13px;
+      padding: 0 2px;
+      flex-shrink: 0;
+      opacity: 0;
+      transition: color 0.15s, opacity 0.15s;
+    }
+
+    .inst-node-header:hover .inst-delete-btn { opacity: 1; }
+    .inst-delete-btn:hover { color: var(--errored); }
+
+    .inst-sessions {
+      padding: 0 0 6px 0;
+    }
+
+    .session-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 12px 5px 24px;
+      cursor: pointer;
+      border-radius: 0;
+      transition: background 0.1s;
+    }
+
+    .session-row:hover { background: var(--surface2); }
+
+    .session-row-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .session-row-dot.attached { background: var(--healthy); }
+    .session-row-dot.detached { background: var(--muted); }
+    .session-row-dot.shell    { background: var(--accent); }
+
+    .session-row-name {
+      font-size: 11px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      color: var(--text);
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .session-row-meta {
+      font-size: 10px;
+      color: var(--muted);
+    }
+
+    .inst-new-session-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px 4px 24px;
+      font-size: 11px;
+      color: var(--muted);
+      cursor: pointer;
+      background: none;
+      border: none;
+      width: 100%;
+      text-align: left;
+      transition: color 0.15s;
+    }
+
+    .inst-new-session-btn:hover { color: var(--accent); }
+
+    /* ── Board view (phase columns only) ──────────────────────── */
     #board-view {
       display: flex;
       gap: 0;
+      flex: 1;
       height: 100%;
       overflow-x: auto;
       padding: 0;
@@ -534,6 +688,7 @@
     #queue-view {
       display: none;
       padding: 20px;
+      flex: 1;
       height: 100%;
       overflow-y: auto;
     }
@@ -998,13 +1153,19 @@
         <option value="0">All time</option>
       </select>
     </div>
-    <button class="add-instance-btn" onclick="openAddInstance()">+ Add instance</button>
     <div class="status-dot" id="status-dot"></div>
     <span id="last-updated">—</span>
   </div>
 </header>
 
 <main>
+  <div id="instance-sidebar">
+    <div class="sidebar-header">
+      <span class="sidebar-header-title">Instances</span>
+      <button class="sidebar-add-btn" onclick="openAddInstance()">+ Add</button>
+    </div>
+    <div id="sidebar-instances"></div>
+  </div>
   <div id="board-view"></div>
   <div id="queue-view"></div>
 </main>
@@ -1256,6 +1417,134 @@ function renderInstanceFilter(instances) {
   btn.classList.toggle('filtered', isFiltered)
 }
 
+// ── Instance sidebar ─────────────────────────────────────────────────────────
+
+// Cache of sessions per instance — refreshed on each poll via /api/terminal
+const sidebarSessions = new Map()  // instName → [{ name, windows, attached }] | null
+
+function renderSidebar(instances) {
+  const container = document.getElementById('sidebar-instances')
+  container.innerHTML = ''
+
+  for (const inst of instances) {
+    const icolor   = getInstanceColor(inst.name)
+    const isPod    = !!inst.pod
+    const sessions = sidebarSessions.get(inst.name) ?? []
+
+    const node = document.createElement('div')
+    node.className = 'inst-node'
+
+    // Header row
+    const hdr = document.createElement('div')
+    hdr.className = 'inst-node-header'
+    hdr.innerHTML = `
+      <span class="inst-node-dot" style="background:${icolor.color}"></span>
+      <span class="inst-node-name" title="${esc(inst.name)}">${esc(inst.name)}</span>
+      <span class="inst-node-type">${isPod ? 'pod' : 'local'}</span>
+      <button class="inst-delete-btn" title="Remove instance"
+        onclick="deleteInstance(event, ${JSON.stringify(inst.name)})">✕</button>
+    `
+    node.appendChild(hdr)
+
+    // Sessions list
+    const sessEl = document.createElement('div')
+    sessEl.className = 'inst-sessions'
+
+    if (isPod && sessions.length === 0) {
+      // Haven't fetched yet — fetch silently
+      fetchSidebarSessions(inst.name)
+    }
+
+    for (const s of sessions) {
+      const row = document.createElement('div')
+      row.className = 'session-row'
+      row.innerHTML = `
+        <span class="session-row-dot ${s.attached ? 'attached' : 'detached'}"></span>
+        <span class="session-row-name">${esc(s.name)}</span>
+        <span class="session-row-meta">${s.windows}w</span>
+      `
+      row.addEventListener('click', () => openTerminalTab(inst.name, s.name))
+      sessEl.appendChild(row)
+    }
+
+    // Local: always show a "shell" entry
+    if (!isPod) {
+      const row = document.createElement('div')
+      row.className = 'session-row'
+      row.innerHTML = `
+        <span class="session-row-dot shell"></span>
+        <span class="session-row-name">shell</span>
+        <span class="session-row-meta">local</span>
+      `
+      row.addEventListener('click', () => openTerminalTab(inst.name, 'shell'))
+      sessEl.appendChild(row)
+    }
+
+    // + New session button (pod only — local always has shell)
+    if (isPod) {
+      const btn = document.createElement('button')
+      btn.className = 'inst-new-session-btn'
+      btn.textContent = '+ New session'
+      btn.addEventListener('click', () => promptNewSession(inst.name))
+      sessEl.appendChild(btn)
+    }
+
+    node.appendChild(sessEl)
+    container.appendChild(node)
+  }
+}
+
+async function fetchSidebarSessions(instName) {
+  try {
+    const res  = await fetch(`/api/terminal/${encodeURIComponent(instName)}`)
+    const data = await res.json()
+    if (data.sessions) {
+      sidebarSessions.set(instName, data.sessions)
+      if (currentData) renderSidebar(currentData.instances)
+    }
+  } catch {}
+}
+
+function openTerminalTab(instName, sessionName) {
+  const url = sessionName === 'shell'
+    ? `/terminal-page/${encodeURIComponent(instName)}`
+    : `/terminal-page/${encodeURIComponent(instName)}?session=${encodeURIComponent(sessionName)}`
+  window.open(url, `term-${instName}-${sessionName}`)
+}
+
+async function promptNewSession(instName) {
+  const sessionName = prompt(`New tmux session name for ${instName}:`, 'steering')
+  if (!sessionName) return
+
+  try {
+    const res  = await fetch(`/api/terminal/${encodeURIComponent(instName)}/session`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ sessionName })
+    })
+    const data = await res.json()
+    if (!res.ok) { alert(`Error: ${data.error}`); return }
+    // Refresh sessions and open terminal tab
+    await fetchSidebarSessions(instName)
+    openTerminalTab(instName, sessionName)
+  } catch (e) {
+    alert(`Failed: ${e.message}`)
+  }
+}
+
+async function deleteInstance(e, instName) {
+  e.stopPropagation()
+  if (!confirm(`Remove instance '${instName}' from the board?`)) return
+  try {
+    const res = await fetch(`/api/instances/${encodeURIComponent(instName)}`, { method: 'DELETE' })
+    if (!res.ok) { const d = await res.json(); alert(d.error); return }
+    sidebarSessions.delete(instName)
+    await poll()
+  } catch (err) {
+    alert(`Failed: ${err.message}`)
+  }
+}
+
 // ── Days filter ──────────────────────────────────────────────────────────────
 
 function getDoneDays() {
@@ -1325,6 +1614,14 @@ function render(data) {
 
   // Render instance filter pills (no-op if instance list unchanged)
   renderInstanceFilter(data.instances)
+
+  // Render sidebar tree
+  renderSidebar(data.instances)
+
+  // Refresh pod sessions every other poll (they don't change often)
+  for (const inst of data.instances) {
+    if (inst.pod && !sidebarSessions.has(inst.name)) fetchSidebarSessions(inst.name)
+  }
 
   // Apply instance filter
   const visibleMilestones = allMilestones.filter(m => !hiddenInstances.has(m._instance.name))

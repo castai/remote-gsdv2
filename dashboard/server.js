@@ -286,6 +286,103 @@ app.get('/api/terminal/:name', (req, res) => {
   setTimeout(() => res.json({ sessions, defaultSession, port, type }), cfg.pod ? 400 : 100)
 })
 
+/**
+ * POST /api/terminal/:name/session
+ * Body: { sessionName }
+ * Creates a new tmux session on the instance (pod or local).
+ */
+app.post('/api/terminal/:name/session', (req, res) => {
+  const cfg = instanceConfigs.find(i => i.name === req.params.name)
+  if (!cfg) return res.status(404).json({ error: 'instance not found' })
+
+  const { sessionName } = req.body ?? {}
+  if (!sessionName || typeof sessionName !== 'string' || !/^[\w\-]+$/.test(sessionName)) {
+    return res.status(400).json({ error: 'sessionName must be alphanumeric/dash/underscore' })
+  }
+
+  try {
+    if (cfg.pod) {
+      const ns      = cfg.namespace ?? 'lk-gsd'
+      const workDir = cfg.gsdPath ? cfg.gsdPath.replace('/.gsd', '') : '/home/gsd/workspace'
+      execFileSync(KUBECTL, [
+        'exec', cfg.pod, '-n', ns, '--',
+        'tmux', 'new-session', '-d', '-s', sessionName, '-c', workDir
+      ], { encoding: 'utf8', timeout: 8000 })
+    } else {
+      const workDir = cfg.localPath.replace('/.gsd', '')
+      execFileSync('tmux', ['new-session', '-d', '-s', sessionName, '-c', workDir],
+        { encoding: 'utf8', timeout: 5000 })
+    }
+    console.log(`[server] created tmux session '${sessionName}' on ${cfg.name}`)
+    res.json({ ok: true, sessionName })
+  } catch (err) {
+    // "duplicate session" is OK — session already exists
+    if (err.message?.includes('duplicate') || err.stderr?.includes('duplicate')) {
+      return res.json({ ok: true, sessionName, existed: true })
+    }
+    res.status(500).json({ error: err.message })
+  }
+})
+
+/**
+ * GET /terminal-page/:name?session=<name>
+ * Serves a full-page ttyd iframe — designed to be opened in a new browser tab.
+ */
+app.get('/terminal-page/:name', (req, res) => {
+  const cfg = instanceConfigs.find(i => i.name === req.params.name)
+  if (!cfg) return res.status(404).send('Instance not found')
+
+  const sessionName = req.query.session ?? cfg.tmuxSession ?? 'gsd'
+  const type        = cfg.pod ? 'pod' : 'local'
+
+  let port
+  try {
+    port = ensureTtyd(cfg)
+  } catch (err) {
+    return res.status(500).send(`Failed to start terminal: ${err.message}`)
+  }
+
+  const ttydUrl = type === 'local'
+    ? `http://localhost:${port}/`
+    : `http://localhost:${port}/?arg=${encodeURIComponent(sessionName)}`
+
+  const title = `${cfg.name} — ${sessionName}`
+
+  // Serve a minimal HTML page that is just a full-screen ttyd iframe
+  setTimeout(() => {
+    res.send(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8"/>
+  <title>${title}</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box }
+    html, body { height:100%; background:#0d1117; overflow:hidden }
+    #bar {
+      height: 32px; display:flex; align-items:center; gap:10px;
+      padding: 0 14px; background:#161b22;
+      border-bottom: 1px solid #2e3349; flex-shrink:0;
+    }
+    #bar-dot { width:8px; height:8px; border-radius:50%; background:#22c55e; }
+    #bar-title { font-family:-apple-system,sans-serif; font-size:12px; color:#e2e8f0; font-weight:500 }
+    #bar-session { font-family:'SF Mono','Fira Code',monospace; font-size:11px;
+      color:#22c55e; background:#0a2a1e; border-radius:4px; padding:1px 7px }
+    body { display:flex; flex-direction:column }
+    iframe { flex:1; border:none; width:100% }
+  </style>
+</head>
+<body>
+  <div id="bar">
+    <span id="bar-dot"></span>
+    <span id="bar-title">${cfg.name}</span>
+    <span id="bar-session">${sessionName}</span>
+  </div>
+  <iframe src="${ttydUrl}" allow="clipboard-read; clipboard-write"></iframe>
+</body>
+</html>`)
+  }, cfg.pod ? 500 : 100)
+})
+
 // ─── Start ────────────────────────────────────────────────────────────────────
 
 const httpServer = createServer(app)
