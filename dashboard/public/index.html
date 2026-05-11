@@ -138,6 +138,128 @@
       border-color: var(--accent);
     }
 
+    .add-instance-btn {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--muted);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 4px 10px;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    .add-instance-btn:hover { border-color: var(--accent); color: var(--text); }
+
+    /* ── Add-instance modal ───────────────────────────────────── */
+    #add-instance-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 300;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #add-instance-overlay.visible { display: flex; }
+
+    #add-instance-modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 24px;
+      width: 420px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    #add-instance-modal h2 {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      margin: 0;
+    }
+
+    .field-group {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .field-label {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--muted);
+    }
+
+    .field-input {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: var(--text);
+      font-size: 12px;
+      padding: 7px 10px;
+      outline: none;
+      font-family: inherit;
+      transition: border-color 0.15s;
+    }
+
+    .field-input:focus { border-color: var(--accent); }
+    .field-input.error { border-color: var(--errored); }
+
+    .field-hint {
+      font-size: 10px;
+      color: var(--muted);
+    }
+
+    #add-instance-error {
+      font-size: 11px;
+      color: var(--errored);
+      background: #2a0a0a;
+      border-radius: 5px;
+      padding: 7px 10px;
+      display: none;
+    }
+
+    #add-instance-error.visible { display: block; }
+
+    .modal-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    .btn-cancel {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      padding: 6px 14px;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+
+    .btn-cancel:hover { border-color: var(--accent); color: var(--text); }
+
+    .btn-primary {
+      background: var(--accent);
+      border: none;
+      border-radius: 5px;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 6px 14px;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+
+    .btn-primary:hover { opacity: 0.85; }
+    .btn-primary:disabled { opacity: 0.4; cursor: default; }
+
     #last-updated {
       color: var(--muted);
       font-size: 11px;
@@ -787,6 +909,7 @@
         <option value="0">All time</option>
       </select>
     </div>
+    <button class="add-instance-btn" onclick="openAddInstance()">+ Add instance</button>
     <div class="status-dot" id="status-dot"></div>
     <span id="last-updated">—</span>
   </div>
@@ -796,6 +919,28 @@
   <div id="board-view"></div>
   <div id="queue-view"></div>
 </main>
+
+<!-- Add instance modal -->
+<div id="add-instance-overlay" onclick="maybeCloseAddInstance(event)">
+  <div id="add-instance-modal">
+    <h2>Add local instance</h2>
+    <div class="field-group">
+      <label class="field-label" for="ai-name">Display name</label>
+      <input class="field-input" id="ai-name" type="text" placeholder="myproject" autocomplete="off" />
+      <span class="field-hint">Letters, numbers, dashes, underscores only</span>
+    </div>
+    <div class="field-group">
+      <label class="field-label" for="ai-path">Project directory</label>
+      <input class="field-input" id="ai-path" type="text" placeholder="/Users/you/projects/myapp" autocomplete="off" spellcheck="false" />
+      <span class="field-hint">Must contain a <code>.gsd/</code> directory</span>
+    </div>
+    <div id="add-instance-error"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeAddInstance()">Cancel</button>
+      <button class="btn-primary" id="ai-submit" onclick="submitAddInstance()">Add instance</button>
+    </div>
+  </div>
+</div>
 
 <!-- Slide-over -->
 <div id="panel-overlay" onclick="closePanel(event)">
@@ -855,6 +1000,92 @@ function getInstanceColor(name) {
   }
   return instanceColorMap.get(name)
 }
+
+// ── Add instance modal ───────────────────────────────────────────────────────
+
+function openAddInstance() {
+  document.getElementById('ai-name').value = ''
+  document.getElementById('ai-path').value = ''
+  document.getElementById('ai-name').classList.remove('error')
+  document.getElementById('ai-path').classList.remove('error')
+  document.getElementById('add-instance-error').classList.remove('visible')
+  document.getElementById('add-instance-overlay').classList.add('visible')
+  setTimeout(() => document.getElementById('ai-name').focus(), 50)
+}
+
+function closeAddInstance() {
+  document.getElementById('add-instance-overlay').classList.remove('visible')
+}
+
+function maybeCloseAddInstance(e) {
+  if (e.target === document.getElementById('add-instance-overlay')) closeAddInstance()
+}
+
+async function submitAddInstance() {
+  const name      = document.getElementById('ai-name').value.trim()
+  const localPath = document.getElementById('ai-path').value.trim()
+  const errEl     = document.getElementById('add-instance-error')
+  const btn       = document.getElementById('ai-submit')
+
+  // Clear previous errors
+  errEl.classList.remove('visible')
+  document.getElementById('ai-name').classList.remove('error')
+  document.getElementById('ai-path').classList.remove('error')
+
+  if (!name) {
+    document.getElementById('ai-name').classList.add('error')
+    errEl.textContent = 'Name is required'
+    errEl.classList.add('visible')
+    return
+  }
+  if (!localPath) {
+    document.getElementById('ai-path').classList.add('error')
+    errEl.textContent = 'Path is required'
+    errEl.classList.add('visible')
+    return
+  }
+
+  btn.disabled = true
+  btn.textContent = 'Adding…'
+
+  try {
+    const res  = await fetch('/api/instances', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ name, localPath })
+    })
+    const data = await res.json()
+
+    if (!res.ok) {
+      document.getElementById('ai-path').classList.add('error')
+      errEl.textContent = data.error || 'Unknown error'
+      errEl.classList.add('visible')
+      return
+    }
+
+    closeAddInstance()
+    // Trigger an immediate poll so the new instance appears on the board
+    await poll()
+  } catch (e) {
+    errEl.textContent = `Request failed: ${e.message}`
+    errEl.classList.add('visible')
+  } finally {
+    btn.disabled = false
+    btn.textContent = 'Add instance'
+  }
+}
+
+// Allow Enter key to submit
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && document.getElementById('add-instance-overlay').classList.contains('visible')) {
+    submitAddInstance()
+  }
+  if (e.key === 'Escape') {
+    closeAddInstance()
+    closePanel()
+    closeTerminal()
+  }
+})
 
 // ── Days filter ──────────────────────────────────────────────────────────────
 
@@ -1306,7 +1537,7 @@ async function openTerminalForInstance(instName, cardTitle) {
 
   const { sessions, defaultSession, port, type } = data
 
-  if (type === 'local') { alert('Local instance terminals not yet supported.'); return }
+  if (type === 'local' && !port) { alert('Local instance terminals not yet supported.'); return }
   if (!port) { alert('No ttyd port available — is ttyd running on the pod?'); return }
 
   terminalState = { instName, cardTitle: cardTitle || instName, sessions, port }
@@ -1318,9 +1549,10 @@ async function openTerminalForInstance(instName, cardTitle) {
     return
   }
 
-  // Single session → connect immediately
-  if (sessions.length === 1) {
-    connectToSession(port, sessions[0].name, cardTitle)
+  // Single session or local (no sessions) → connect immediately
+  if (sessions.length <= 1 || type === 'local') {
+    const session = sessions[0]?.name ?? defaultSession
+    connectToSession(port, type === 'local' ? 'shell' : session, cardTitle)
     return
   }
 
@@ -1369,17 +1601,21 @@ function repickSession() {
 }
 
 function connectToSession(port, sessionName, cardTitle) {
-  // Remember the choice
-  if (terminalState) rememberSession(terminalState.instName, sessionName)
+  // Remember the choice (only meaningful for tmux sessions, not plain shells)
+  if (terminalState && sessionName !== 'shell') rememberSession(terminalState.instName, sessionName)
 
-  // Close slide-over, open full-screen overlay
   document.getElementById('panel-overlay').classList.remove('visible')
   document.getElementById('session-picker').classList.remove('visible')
 
   document.getElementById('terminal-overlay-title').textContent = cardTitle || terminalState?.instName || '—'
-  document.getElementById('terminal-overlay-session').textContent = sessionName
+  document.getElementById('terminal-overlay-session').textContent =
+    sessionName === 'shell' ? 'shell' : sessionName
 
-  const url = `http://localhost:${port}/?arg=${encodeURIComponent(sessionName)}`
+  // For tmux sessions pass ?arg=<session>; for plain shell just load the root URL
+  const url = sessionName === 'shell'
+    ? `http://localhost:${port}/`
+    : `http://localhost:${port}/?arg=${encodeURIComponent(sessionName)}`
+
   document.getElementById('ttyd-frame').src = url
   document.getElementById('terminal-overlay').classList.add('visible')
 }

@@ -11,5 +11,9 @@
     "name": "remote_gsdv2",
     "localPath": "/Users/leonkuperman/LKDev/CAST/remote_gsdv2/.gsd",
     "tmuxSession": "gsd"
+  },
+  {
+    "name": "oc-salesanalyzer",
+    "localPath": "/Users/leonkuperman/LKDev/CAST/oc_salesanalyzer_control/.gsd"
   }
 ]
