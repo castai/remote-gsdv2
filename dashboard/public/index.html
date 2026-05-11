@@ -1798,7 +1798,7 @@ function makeQuickChip(qt) {
 
 // ── Queue view ────────────────────────────────────────────────────────────────
 
-const URGENCY = { Errored: 0, Blocked: 1, AwaitingVerification: 2, QuestionPending: 3 }
+const URGENCY = { Errored: 0, Blocked: 1, QuestionPending: 2, AwaitingVerification: 3 }
 
 function renderQueue(items) {
   const qv = document.getElementById('queue-view')
@@ -1896,15 +1896,19 @@ Type: ${esc(ps.unitType || '—')}</div>
 
   // Attention detail
   if (m.attentionDetail) {
-    const isTimeout = m.attentionDetail.toLowerCase().includes('timeout') ||
-                      m.attentionDetail.toLowerCase().includes('timed out')
+    const isError     = m.attention === 'Errored'
+    const isQuestion  = m.attention === 'QuestionPending'
     const isTransient = m.attentionDetail.toLowerCase().includes('transient')
+    const label = isError ? '⚠ Error Detail'
+                : isQuestion ? '💬 Waiting for Input'
+                : 'Attention Detail'
+    const borderStyle = isError   ? 'border-left:3px solid var(--errored);padding-left:10px'
+                      : isQuestion ? 'border-left:3px solid var(--question);padding-left:10px'
+                      : ''
     html += `
       <div class="panel-section">
-        <div class="panel-section-title">
-          ${m.attention === 'Errored' ? '⚠ Error Detail' : 'Attention Detail'}
-        </div>
-        <div class="runtime-block" style="${m.attention === 'Errored' ? 'border-left:3px solid var(--errored);padding-left:10px' : ''}">${esc(m.attentionDetail)}${isTransient ? '\n\n(transient — safe to resume)' : ''}</div>
+        <div class="panel-section-title">${label}</div>
+        <div class="runtime-block" style="${borderStyle}">${esc(m.attentionDetail)}${isTransient ? '\n\n(transient — safe to resume)' : ''}</div>
       </div>`
   }
 

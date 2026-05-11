@@ -91,24 +91,48 @@ function derivePhase(milestone, slices, tasks, recentJournalEvents, pausedSessio
  * Returns { attention, attentionDetail }
  */
 function deriveAttention(milestone, { pausedSession, stuckState, recentNotifications, lastError }) {
-  const mid = milestone.id
-
+  const mid      = milestone.id
   const isPaused = pausedSession && pausedSession.milestoneId === mid
 
   if (isPaused) {
-    // Prefer the structured lastError from the journal — it has the real message
-    if (lastError && lastError.unitId && lastError.unitId.startsWith(mid + '/')) {
-      const isTimeout  = lastError.category === 'timeout'
-      const label      = isTimeout ? 'Timed out' : 'Errored'
-      const transient  = lastError.isTransient ? ' (transient)' : ''
+    // ── Step-mode: always check this first ──────────────────────────────────
+    // stepMode = agent paused itself waiting for user to type or run /gsd next.
+    // This beats any error — the error may be what caused the pause (transient),
+    // but the actionable state is "waiting for you", not "broken".
+    if (pausedSession.stepMode) {
+      // Find the most recent step-mode pause notification for the detail text
+      const stepNotif = [...(recentNotifications || [])]
+        .reverse()
+        .find(n => {
+          const msg = (n.message || '').toLowerCase()
+          return msg.includes('step-mode paused') || msg.includes('/gsd next') || msg.includes('step mode')
+        })
+
+      const detail = stepNotif?.message
+        ?? `Step-mode paused at ${pausedSession.unitId}. Type to interact or /gsd next to resume.`
+
+      // If there was also a transient error, surface it but keep attention=QuestionPending
+      const errorSuffix = (lastError?.isTransient && lastError.unitId?.startsWith(mid + '/'))
+        ? `\n\nLast error (transient): ${lastError.message}`
+        : ''
+
       return {
-        attention: 'Errored',
+        attention:       'QuestionPending',
+        attentionDetail: detail + errorSuffix
+      }
+    }
+
+    // ── Non-step-mode: real errors ───────────────────────────────────────────
+    if (lastError && lastError.unitId && lastError.unitId.startsWith(mid + '/')) {
+      const transient = lastError.isTransient ? ' (transient)' : ''
+      return {
+        attention:       lastError.isTransient ? 'Blocked' : 'Errored',
         attentionDetail: `${lastError.unitId} ${lastError.status ?? 'cancelled'}${transient}: ${lastError.message}`
       }
     }
 
     // Fall back to stuckState recentUnits
-    const recentUnits = stuckState?.recentUnits || []
+    const recentUnits     = stuckState?.recentUnits || []
     const milestoneErrors = recentUnits.filter(u => {
       const key = u.key || ''
       return (key.includes(`/${mid}/`) || key.includes(`/${mid}`)) && u.error
@@ -119,61 +143,47 @@ function deriveAttention(milestone, { pausedSession, stuckState, recentNotificat
       let detail = 'Agent execution errored'
       try {
         const parsed = JSON.parse(lastUnit.error)
-        const txt = parsed?.content?.[0]?.text
+        const txt    = parsed?.content?.[0]?.text
         if (txt) detail = txt.slice(0, 120).trim()
       } catch {
-        if (typeof lastUnit.error === 'string') {
-          detail = lastUnit.error.slice(0, 120)
-        }
+        if (typeof lastUnit.error === 'string') detail = lastUnit.error.slice(0, 120)
       }
-      return {
-        attention: 'Errored',
-        attentionDetail: `${pausedSession.unitId} paused with error: ${detail}`
-      }
+      return { attention: 'Errored', attentionDetail: `${pausedSession.unitId} paused: ${detail}` }
     }
 
-    // Paused but no error found — blocked waiting for input
+    // Paused, no error — blocked
     return {
-      attention: 'Blocked',
+      attention:       'Blocked',
       attentionDetail: `Auto-mode paused at ${pausedSession.unitId} since ${pausedSession.pausedAt?.slice(0, 19) ?? 'unknown'}`
     }
   }
 
-  // Not paused: check lastError if it's recent and for this milestone
+  // ── Not paused ──────────────────────────────────────────────────────────────
   if (lastError && lastError.unitId && lastError.unitId.startsWith(mid + '/')) {
     return {
-      attention: 'Errored',
+      attention:       lastError.isTransient ? 'Blocked' : 'Errored',
       attentionDetail: `${lastError.unitId} ${lastError.status ?? 'cancelled'}: ${lastError.message}`
     }
   }
 
-  // stuckState fallback
   if (stuckState) {
     const recentUnits = stuckState.recentUnits || []
-    const lastUnit = recentUnits[recentUnits.length - 1]
+    const lastUnit    = recentUnits[recentUnits.length - 1]
     if (lastUnit?.error && (lastUnit.key || '').includes(mid)) {
-      return {
-        attention: 'Errored',
-        attentionDetail: `Last unit errored: ${lastUnit.key}`
-      }
+      return { attention: 'Errored', attentionDetail: `Last unit errored: ${lastUnit.key}` }
     }
   }
 
-  // QuestionPending
+  // QuestionPending via warning notification
   const questionNotif = (recentNotifications || []).find(n => {
     const msg = (n.message || '').toLowerCase()
     return (
-      msg.includes('question') ||
-      msg.includes('awaiting') ||
-      msg.includes('needs input') ||
-      msg.includes('blocked on')
+      msg.includes('question') || msg.includes('awaiting') ||
+      msg.includes('needs input') || msg.includes('blocked on')
     ) && n.severity === 'warning'
   })
   if (questionNotif) {
-    return {
-      attention: 'QuestionPending',
-      attentionDetail: questionNotif.message.slice(0, 120)
-    }
+    return { attention: 'QuestionPending', attentionDetail: questionNotif.message.slice(0, 120) }
   }
 
   return { attention: 'Healthy', attentionDetail: null }

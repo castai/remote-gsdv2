@@ -100,7 +100,7 @@ test('no paused session, no errors → Healthy', () => {
 test('paused session for this milestone + stuck error → Errored', () => {
   const result = deriveMilestone(ms({ id: 'M026' }), {
     slices: [sl({ status: 'in_progress' })],
-    pausedSession: { milestoneId: 'M026', unitId: 'M026/S01/T03', pausedAt: '2026-05-07T17:26:01Z' },
+    pausedSession: { milestoneId: 'M026', unitId: 'M026/S01/T03', pausedAt: '2026-05-07T17:26:01Z', stepMode: false },
     stuckState: {
       recentUnits: [
         { key: 'execute-task/M026/S01/T03', error: 'timeout' }
@@ -114,11 +114,42 @@ test('paused session for this milestone + stuck error → Errored', () => {
 test('paused session for this milestone, no error → Blocked', () => {
   const result = deriveMilestone(ms({ id: 'M026' }), {
     slices: [sl({ status: 'in_progress' })],
-    pausedSession: { milestoneId: 'M026', unitId: 'M026/S01/T02', pausedAt: '2026-05-07T17:26:01Z' },
+    pausedSession: { milestoneId: 'M026', unitId: 'M026/S01/T02', pausedAt: '2026-05-07T17:26:01Z', stepMode: false },
     stuckState: { recentUnits: [] }
   })
   assert.equal(result.attention, 'Blocked')
   assert.ok(result.attentionDetail.includes('M026/S01/T02'))
+})
+
+test('step-mode pause → QuestionPending regardless of transient error', () => {
+  const result = deriveMilestone(ms({ id: 'M027' }), {
+    slices: [sl({ status: 'pending' })],
+    pausedSession: {
+      milestoneId: 'M027', unitId: 'M027/S01', pausedAt: '2026-05-11T22:56:58Z',
+      stepMode: true, unitType: 'research-slice'
+    },
+    lastError: {
+      unitId: 'M027/S01', status: 'cancelled', isTransient: true,
+      category: 'session-failed', message: 'Session creation failed transiently'
+    },
+    recentNotifications: [
+      { severity: 'info', message: 'Step-mode paused (Escape). Type to interact, or /gsd next to resume.' }
+    ]
+  })
+  assert.equal(result.attention, 'QuestionPending')
+  assert.ok(result.attentionDetail.includes('/gsd next'))
+})
+
+test('step-mode pause, no notification → QuestionPending with fallback detail', () => {
+  const result = deriveMilestone(ms({ id: 'M027' }), {
+    slices: [sl({ status: 'pending' })],
+    pausedSession: {
+      milestoneId: 'M027', unitId: 'M027/S01', pausedAt: '2026-05-11T22:56:58Z',
+      stepMode: true
+    }
+  })
+  assert.equal(result.attention, 'QuestionPending')
+  assert.ok(result.attentionDetail.includes('M027/S01'))
 })
 
 test('paused session for different milestone → Healthy (not this milestone)', () => {
