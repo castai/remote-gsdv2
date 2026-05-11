@@ -50,6 +50,7 @@ function buildTtydCmd() {
     'ttyd', '-p', '7681', '-W', '-a',
     '-t', `fontSize=${terminalPrefs.fontSize}`,
     '-t', `fontFamily=${terminalPrefs.fontFamily}`,
+    '-t', 'allowProposedApi=true',
     '/tmp/tmux-attach.sh'
   ]
   return parts.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ')
@@ -117,6 +118,7 @@ function ensureTtyd(cfg) {
     '-p', String(port), '-W',
     '-t', `fontSize=${terminalPrefs.fontSize}`,
     '-t', `fontFamily=${terminalPrefs.fontFamily}`,
+    '-t', 'allowProposedApi=true',
     shell
   ], { stdio: 'pipe', cwd: workDir })
   proc.stderr?.on('data', d => { if (process.env.DEBUG) process.stderr.write(`[ttyd:${cfg.name}] ${d}`) })
@@ -325,9 +327,10 @@ app.get('/terminal-page/:name', (req, res) => {
     #bar-session{font-family:'SF Mono','Fira Code',monospace;font-size:11px;
       color:#22c55e;background:#0a2a1e;border-radius:4px;padding:1px 7px}
     #bar-spacer{flex:1}
-    #settings-btn{background:none;border:1px solid #2e3349;border-radius:4px;
-      color:#64748b;font-size:13px;padding:3px 8px;cursor:pointer;transition:border-color .15s,color .15s}
-    #settings-btn:hover{border-color:#6366f1;color:#e2e8f0}
+    .bar-btn{background:none;border:1px solid #2e3349;border-radius:4px;
+      color:#64748b;font-size:11px;padding:3px 8px;cursor:pointer;transition:border-color .15s,color .15s;white-space:nowrap}
+    .bar-btn:hover{border-color:#6366f1;color:#e2e8f0}
+    #settings-btn{font-size:13px}
     #settings-panel{display:none;position:absolute;top:40px;right:12px;
       background:#1a1d27;border:1px solid #2e3349;border-radius:8px;
       padding:16px;width:260px;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,.5)}
@@ -353,7 +356,8 @@ app.get('/terminal-page/:name', (req, res) => {
     <span id="bar-title">${cfg.name}</span>
     <span id="bar-session">${sessionName}</span>
     <span id="bar-spacer"></span>
-    <button id="settings-btn" onclick="toggleSettings(event)">⚙</button>
+    <button class="bar-btn" id="paste-btn" onclick="pasteFromClipboard()" title="Paste (Cmd+V)">⌘V Paste</button>
+    <button class="bar-btn" id="settings-btn" onclick="toggleSettings(event)">⚙</button>
     <div id="settings-panel">
       <div class="sp-title">Terminal settings</div>
       <div class="sp-row"><span class="sp-label">Font size</span>
@@ -375,6 +379,10 @@ app.get('/terminal-page/:name', (req, res) => {
   <script>
     const INST=${instJson}, SESSION=${sessionJson}, IS_LOCAL=${isLocalJson}
 
+    // Direct WebSocket to ttyd for paste — bypasses iframe cross-origin clipboard restriction
+    let ttydWs = null
+    let ttydPort = null
+
     async function loadTerminal(){
       try{
         const res=await fetch('/api/terminal/'+encodeURIComponent(INST))
@@ -387,13 +395,77 @@ app.get('/terminal-page/:name', (req, res) => {
         const wrap=document.getElementById('frame-wrap')
         if(cols>0){wrap.style.maxWidth=Math.round(cols*fs*0.61)+'px';wrap.style.margin='0 auto'}
         else{wrap.style.maxWidth='';wrap.style.margin=''}
+        ttydPort=data.port
         const url=IS_LOCAL
           ?'http://localhost:'+data.port+'/'
           :'http://localhost:'+data.port+'/?arg='+encodeURIComponent(SESSION)
         document.getElementById('ttyd-frame').src=url
+        // Connect our own WS for paste injection
+        connectPasteWs(data.port)
       }catch(e){console.error('loadTerminal:',e)}
     }
     loadTerminal()
+
+    // ── Paste WebSocket ───────────────────────────────────────────────────────
+    // ttyd WS protocol: send binary frame where first byte is type
+    //   type 0 = auth  { "AuthToken": "" }
+    //   type 1 = input (keystrokes / paste data)
+
+    function connectPasteWs(port){
+      if(ttydWs){try{ttydWs.close()}catch{}}
+      const ws=new WebSocket('ws://localhost:'+port+'/ws')
+      ws.binaryType='arraybuffer'
+      ws.onopen=()=>{
+        // Auth handshake
+        const auth=JSON.stringify({AuthToken:''})
+        const msg=new Uint8Array(auth.length+1)
+        msg[0]=0  // type=auth
+        for(let i=0;i<auth.length;i++) msg[i+1]=auth.charCodeAt(i)
+        ws.send(msg)
+      }
+      ws.onerror=e=>console.warn('[paste-ws] error',e)
+      ws.onclose=()=>{ ttydWs=null }
+      ttydWs=ws
+    }
+
+    function sendPaste(text){
+      if(!ttydWs||ttydWs.readyState!==WebSocket.OPEN){
+        if(ttydPort) connectPasteWs(ttydPort)
+        setTimeout(()=>sendPaste(text),300)
+        return
+      }
+      // Wrap in bracketed paste sequences so tmux/shell handles multi-line correctly
+      const wrapped='\x1b[200~'+text+'\x1b[201~'
+      const encoded=new TextEncoder().encode(wrapped)
+      const msg=new Uint8Array(encoded.length+1)
+      msg[0]=1  // type=input
+      msg.set(encoded,1)
+      ttydWs.send(msg)
+    }
+
+    async function pasteFromClipboard(){
+      try{
+        const text=await navigator.clipboard.readText()
+        if(text) sendPaste(text)
+      }catch(e){
+        console.warn('[paste] clipboard read failed:',e.message)
+        // Fallback: focus iframe and let user Cmd+V natively
+        document.getElementById('ttyd-frame').focus()
+        alert('Clipboard access denied. Click inside the terminal and use Cmd+V.')
+      }
+    }
+
+    // Intercept Cmd+V in the outer page and route to paste function
+    document.addEventListener('keydown',e=>{
+      if((e.metaKey||e.ctrlKey)&&e.key==='v'){
+        e.preventDefault()
+        pasteFromClipboard()
+      }
+      if((e.metaKey||e.ctrlKey)&&e.key===','){
+        e.preventDefault()
+        toggleSettings(e)
+      }
+    })
 
     function toggleSettings(e){e.stopPropagation();document.getElementById('settings-panel').classList.toggle('open')}
     function closeSettings(){document.getElementById('settings-panel').classList.remove('open')}
