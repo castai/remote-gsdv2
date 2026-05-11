@@ -1,4 +1,5 @@
 {
-  "fontSize": 25,
-  "fontFamily": "Menlo, monospace"
+  "fontSize": 14,
+  "fontFamily": "Menlo, monospace",
+  "cols": 0
 }

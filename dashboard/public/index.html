@@ -1541,11 +1541,27 @@ async function promptNewSession(instName) {
 
 async function deleteInstance(e, instName) {
   e.stopPropagation()
-  if (!confirm(`Remove instance '${instName}' from the board?`)) return
+  const btn = e.currentTarget
+  if (btn.dataset.confirming !== 'yes') {
+    btn.dataset.confirming = 'yes'
+    btn.textContent = 'Sure?'
+    btn.style.color = 'var(--errored)'
+    setTimeout(() => {
+      if (btn.dataset.confirming === 'yes') {
+        btn.dataset.confirming = ''
+        btn.textContent = '✕'
+        btn.style.color = ''
+      }
+    }, 3000)
+    return
+  }
+  btn.dataset.confirming = ''
   try {
     const res = await fetch(`/api/instances/${encodeURIComponent(instName)}`, { method: 'DELETE' })
     if (!res.ok) { const d = await res.json(); alert(d.error); return }
     sidebarSessions.delete(instName)
+    hiddenInstances.delete(instName)
+    persistFilter()
     await poll()
   } catch (err) {
     alert(`Failed: ${err.message}`)
