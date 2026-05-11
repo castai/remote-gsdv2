@@ -114,6 +114,42 @@
 
     .status-dot.stale { background: var(--muted); }
 
+    /* ── Instance filter ──────────────────────────────────────── */
+    #instance-filter {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .inst-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      border-radius: 5px;
+      padding: 3px 8px;
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: opacity 0.15s, border-color 0.15s;
+      user-select: none;
+    }
+
+    .inst-pill.active {
+      opacity: 1;
+    }
+
+    .inst-pill.muted {
+      opacity: 0.35;
+      border-color: transparent !important;
+    }
+
+    .inst-pill-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
     /* ── Days filter ──────────────────────────────────────────── */
     .days-filter {
       display: flex;
@@ -900,6 +936,7 @@
     </button>
   </div>
   <div class="header-right">
+    <div id="instance-filter"></div>
     <div class="days-filter">
       <label for="done-days">Done:</label>
       <select id="done-days" onchange="applyFilter()">
@@ -1087,6 +1124,48 @@ document.addEventListener('keydown', e => {
   }
 })
 
+// ── Instance filter ───────────────────────────────────────────────────────────
+
+const hiddenInstances = new Set()  // instance names currently filtered out
+
+function renderInstanceFilter(instances) {
+  const container = document.getElementById('instance-filter')
+
+  // Only re-render if the instance list changed
+  const names = instances.map(i => i.name).join(',')
+  if (container.dataset.names === names) return
+  container.dataset.names = names
+
+  container.innerHTML = ''
+  for (const inst of instances) {
+    const icolor = getInstanceColor(inst.name)
+    const pill   = document.createElement('button')
+    pill.className = 'inst-pill ' + (hiddenInstances.has(inst.name) ? 'muted' : 'active')
+    pill.style.background   = icolor.bg
+    pill.style.color        = icolor.color
+    pill.style.borderColor  = hiddenInstances.has(inst.name) ? 'transparent' : icolor.color
+    pill.dataset.name = inst.name
+    pill.innerHTML = `
+      <span class="inst-pill-dot" style="background:${icolor.color}"></span>
+      ${esc(inst.name)}
+    `
+    pill.addEventListener('click', () => {
+      if (hiddenInstances.has(inst.name)) {
+        hiddenInstances.delete(inst.name)
+      } else {
+        // Don't hide the last visible instance
+        const visible = instances.filter(i => !hiddenInstances.has(i.name))
+        if (visible.length <= 1) return
+        hiddenInstances.add(inst.name)
+      }
+      // Re-render filter pills and board
+      container.dataset.names = ''  // force re-render
+      if (currentData) render(currentData)
+    })
+    container.appendChild(pill)
+  }
+}
+
 // ── Days filter ──────────────────────────────────────────────────────────────
 
 function getDoneDays() {
@@ -1154,11 +1233,18 @@ function render(data) {
     }
   }
 
-  // Attention count for badge
-  const attentionItems = allMilestones.filter(m => m.attention && m.attention !== 'Healthy')
+  // Render instance filter pills (no-op if instance list unchanged)
+  renderInstanceFilter(data.instances)
+
+  // Apply instance filter
+  const visibleMilestones = allMilestones.filter(m => !hiddenInstances.has(m._instance.name))
+  const visibleQuickTasks = allQuickTasks.filter(qt => !hiddenInstances.has(qt._instance.name))
+
+  // Attention count — only visible instances
+  const attentionItems = visibleMilestones.filter(m => m.attention && m.attention !== 'Healthy')
   document.getElementById('queue-count').textContent = attentionItems.length
 
-  renderBoard(allMilestones, data.instances, allQuickTasks)
+  renderBoard(visibleMilestones, data.instances, visibleQuickTasks)
   renderQueue(attentionItems)
 
   // Re-render open panel if one is selected

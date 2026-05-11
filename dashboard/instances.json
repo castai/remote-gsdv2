@@ -15,5 +15,13 @@
   {
     "name": "oc-salesanalyzer",
     "localPath": "/Users/leonkuperman/LKDev/CAST/oc_salesanalyzer_control/.gsd"
+  },
+  {
+    "name": "PERSONAL-opts",
+    "localPath": "/Users/leonkuperman/LKDev/options_strategies/.gsd"
+  },
+  {
+    "name": "voice-assistant",
+    "localPath": "/Users/leonkuperman/LKDev/spark-voice-assistant/.gsd"
   }
 ]
