@@ -26,7 +26,6 @@
       --done-col:    #22263a;
       --active-col:  #1e2535;
 
-      --col-width:   260px;
       --header-h:    52px;
     }
 
@@ -367,9 +366,8 @@
     }
 
     .phase-column {
-      min-width: var(--col-width);
-      width: var(--col-width);
-      flex-shrink: 0;
+      flex: 1 1 0;
+      min-width: 160px;
       display: flex;
       flex-direction: column;
       border-right: 1px solid var(--border);
