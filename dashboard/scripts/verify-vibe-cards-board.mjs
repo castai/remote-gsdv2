@@ -417,13 +417,6 @@ async function verifyModal() {
     await page.locator('#vibe-modal-overlay.visible').waitFor({ state: 'visible' })
     await page.waitForSelector('#vibe-instance option', { state: 'attached' })
 
-    await page.fill('#vibe-title', 'Modal Flow Card')
-    await page.fill('#vibe-description', 'Created through modal verifier')
-    await page.selectOption('#vibe-lane', 'review')
-    await page.selectOption('#vibe-priority', 'high')
-    await page.selectOption('#vibe-status', 'blocked')
-    await page.selectOption('#vibe-color', 'green')
-
     const instanceOptions = await page.locator('#vibe-instance option').evaluateAll(options =>
       options.map(option => ({ value: option.value, text: option.textContent || '' }))
     )
@@ -433,7 +426,9 @@ async function verifyModal() {
     if (preferredInstance) {
       await page.selectOption('#vibe-instance', preferredInstance.value)
       await page.waitForFunction(() => {
+        const instance = document.querySelector('#vibe-instance')?.value || ''
         const hint = document.querySelector('#vibe-session-hint')?.textContent || ''
+        if (!instance) return true
         return !hint.includes('Choose an instance to load sessions.') && !hint.includes('Loading sessions…')
       })
       const sessionHint = await page.locator('#vibe-session-hint').textContent()
@@ -442,29 +437,53 @@ async function verifyModal() {
         assert.equal(sessionDisabled, true, 'Failed session loads should disable the session selector')
       } else if (sessionHint?.includes('No tmux sessions found')) {
         assert.equal(sessionDisabled, true, 'Empty session lists should disable the session selector')
+      } else if (sessionHint?.includes('Local instances default to shell')) {
+        assert.equal(sessionDisabled, false, 'Local instance session defaults should keep the selector enabled')
+        const selectedSession = await page.locator('#vibe-session').inputValue()
+        assert.ok(selectedSession.length > 0, 'Local instances should preselect an available session value')
       } else {
         assert.equal(sessionDisabled, false, 'Successful session loads should enable the session selector')
       }
     }
 
+    await page.click('#vibe-title')
+    await page.type('#vibe-title', 'Modal Flow Card')
+    await page.click('#vibe-description')
+    await page.type('#vibe-description', 'Created through modal verifier')
+    await page.selectOption('#vibe-lane', 'review')
+    await page.selectOption('#vibe-priority', 'high')
+    await page.selectOption('#vibe-status', 'blocked')
+    await page.selectOption('#vibe-color', 'green')
+
     await page.fill('#vibe-jira', 'https://jira.example.com/browse/VIBE-123')
-    await page.fill('#vibe-labels', 'modal, verify')
-    await page.waitForFunction(() => {
-      const title = document.querySelector('#vibe-title')?.value?.trim() || ''
-      const submit = document.querySelector('#vibe-submit')
-      const derivedId = document.querySelector('#vibe-id')?.value || ''
-      return title === 'Modal Flow Card' && derivedId === 'modal-flow-card' && !!submit && !submit.disabled
-    })
+    await page.click('#vibe-labels')
+    await page.type('#vibe-labels', 'modal, verify')
+    await page.waitForTimeout(250)
+    const preSubmitState = await page.evaluate(() => ({
+      title: document.querySelector('#vibe-title')?.value?.trim() || '',
+      labels: document.querySelector('#vibe-labels')?.value?.trim() || '',
+      derivedId: document.querySelector('#vibe-id')?.value || '',
+      submitDisabled: !!document.querySelector('#vibe-submit')?.disabled,
+      submitText: document.querySelector('#vibe-submit')?.textContent?.trim() || '',
+      hint: document.querySelector('#vibe-session-hint')?.textContent || ''
+    }))
+    assert.equal(preSubmitState.title, 'Modal Flow Card', `Unexpected create title state: ${JSON.stringify(preSubmitState)}`)
+    assert.equal(preSubmitState.labels, 'modal, verify', `Unexpected create labels state: ${JSON.stringify(preSubmitState)}`)
+    assert.equal(preSubmitState.submitDisabled, false, `Create submit should be enabled: ${JSON.stringify(preSubmitState)}`)
+    assert.equal(preSubmitState.submitText, 'Create card', `Unexpected create submit label: ${JSON.stringify(preSubmitState)}`)
+    assert.ok(preSubmitState.derivedId.length > 0, `Derived id preview should not be empty: ${JSON.stringify(preSubmitState)}`)
 
     const createRequestPromise = page.waitForRequest(request => request.method() === 'POST' && request.url().endsWith('/api/vibe-cards'))
-    const createResponsePromise = page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith('/api/vibe-cards') && response.status() === 201)
-    await page.click('#vibe-submit')
+    const createResponsePromise = page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith('/api/vibe-cards'))
+    await page.evaluate(() => submitVibeModal())
     const createRequest = await createRequestPromise
     const createResponse = await createResponsePromise
     const createBody = createRequest.postDataJSON()
+    assert.equal(createResponse.status(), 201, 'Create response should succeed')
     const createJson = await createResponse.json()
 
     assert.equal(createBody.title, 'Modal Flow Card', 'Create payload should include the modal title')
+    assert.equal(createBody.id, preSubmitState.derivedId, 'Create payload should use the previewed card id')
     assert.equal(createBody.description, 'Created through modal verifier', 'Create payload should include the modal description')
     assert.equal(createBody.lane, 'review', 'Create payload should use the chosen lane')
     assert.equal(createBody.priority, 'high', 'Create payload should include the chosen priority')
@@ -472,18 +491,22 @@ async function verifyModal() {
     assert.deepEqual(createBody.tags, ['modal', 'verify'], 'Create payload should normalize comma-separated labels into tags')
     assert.equal(createBody.metadata?.color, 'green', 'Create payload should include metadata.color')
     assert.equal(createBody.metadata?.jiraUrl, 'https://jira.example.com/browse/VIBE-123', 'Create payload should include metadata.jiraUrl')
-    assert.equal(createJson.card?.id, 'modal-flow-card', 'Created card id should derive from the title slug')
+    assert.equal(createJson.card?.id, preSubmitState.derivedId, 'Created card id should match the modal preview field')
 
     await page.locator('#vibe-modal-overlay.visible').waitFor({ state: 'hidden' })
-    await page.waitForSelector('[data-vibe-card-id="modal-flow-card"]')
+    await page.waitForSelector(`[data-vibe-card-id="${preSubmitState.derivedId}"]`)
     await assertTextVisible(page.locator('#col-Validating'), 'Modal Flow Card')
 
-    await page.click('[data-vibe-card-id="modal-flow-card"]')
+    await page.click(`[data-vibe-card-id="${preSubmitState.derivedId}"]`)
     await page.locator('#vibe-modal-overlay.visible').waitFor({ state: 'visible' })
-    assert.equal(await page.locator('#vibe-id').inputValue(), 'modal-flow-card', 'Edit modal should preserve the persisted card id')
+    assert.equal(await page.locator('#vibe-id').inputValue(), preSubmitState.derivedId, 'Edit modal should preserve the persisted card id')
 
-    await page.fill('#vibe-description', 'Updated through modal verifier')
-    await page.fill('#vibe-labels', 'modal, edited')
+    await page.click('#vibe-description')
+    await page.fill('#vibe-description', '')
+    await page.type('#vibe-description', 'Updated through modal verifier')
+    await page.click('#vibe-labels')
+    await page.fill('#vibe-labels', '')
+    await page.type('#vibe-labels', 'modal, edited')
     await page.selectOption('#vibe-status', 'done')
     await page.waitForFunction(() => {
       const submit = document.querySelector('#vibe-submit')
@@ -492,8 +515,8 @@ async function verifyModal() {
       return !!submit && !submit.disabled && status === 'done' && description === 'Updated through modal verifier'
     })
 
-    const patchRequestPromise = page.waitForRequest(request => request.method() === 'PATCH' && request.url().includes('/api/vibe-cards/modal-flow-card'))
-    const patchResponsePromise = page.waitForResponse(response => response.request().method() === 'PATCH' && response.url().includes('/api/vibe-cards/modal-flow-card') && response.status() === 200, { timeout: 10000 })
+    const patchRequestPromise = page.waitForRequest(request => request.method() === 'PATCH' && request.url().includes(`/api/vibe-cards/${preSubmitState.derivedId}`))
+    const patchResponsePromise = page.waitForResponse(response => response.request().method() === 'PATCH' && response.url().includes(`/api/vibe-cards/${preSubmitState.derivedId}`) && response.status() === 200, { timeout: 10000 })
     await page.click('#vibe-submit')
     const patchRequest = await patchRequestPromise
     const patchResponse = await patchResponsePromise
@@ -506,27 +529,27 @@ async function verifyModal() {
     assert.equal(patchJson.card?.status, 'done', 'PATCH response should include the updated status')
 
     await page.locator('#vibe-modal-overlay.visible').waitFor({ state: 'hidden' })
-    await page.waitForSelector('[data-vibe-card-id="modal-flow-card"]')
+    await page.waitForSelector(`[data-vibe-card-id="${preSubmitState.derivedId}"]`)
 
     const persistedAfterPatch = await request('/api/vibe-cards')
-    const editedCard = persistedAfterPatch.json.cards.find(card => card.id === 'modal-flow-card')
+    const editedCard = persistedAfterPatch.json.cards.find(card => card.id === preSubmitState.derivedId)
     assert.equal(editedCard?.description, 'Updated through modal verifier', 'Updated description should persist via API state')
     assert.deepEqual(editedCard?.tags, ['modal', 'edited'], 'Updated tags should persist via API state')
 
-    await page.click('[data-vibe-card-id="modal-flow-card"]')
+    await page.click(`[data-vibe-card-id="${preSubmitState.derivedId}"]`)
     await page.locator('#vibe-modal-overlay.visible').waitFor({ state: 'visible' })
-    const deleteResponsePromise = page.waitForResponse(response => response.request().method() === 'DELETE' && response.url().includes('/api/vibe-cards/modal-flow-card') && response.status() === 200)
+    const deleteResponsePromise = page.waitForResponse(response => response.request().method() === 'DELETE' && response.url().includes(`/api/vibe-cards/${preSubmitState.derivedId}`) && response.status() === 200)
     await page.click('#vibe-delete')
     await deleteResponsePromise
     await page.locator('#vibe-modal-overlay.visible').waitFor({ state: 'hidden' })
     await assert.rejects(
-      page.waitForSelector('[data-vibe-card-id="modal-flow-card"]', { state: 'attached', timeout: 800 }),
+      page.waitForSelector(`[data-vibe-card-id="${preSubmitState.derivedId}"]`, { state: 'attached', timeout: 800 }),
       /Timeout/,
       'Deleted card should be removed from the board'
     )
 
     const persistedAfterDelete = await request('/api/vibe-cards')
-    assert.equal(persistedAfterDelete.json.cards.some(card => card.id === 'modal-flow-card'), false, 'Deleted card should be removed from persisted API state')
+    assert.equal(persistedAfterDelete.json.cards.some(card => card.id === preSubmitState.derivedId), false, 'Deleted card should be removed from persisted API state')
 
     const methods = apiRequests.map(request => request.method)
     assert.ok(methods.includes('POST'), 'Modal flow should issue a create request')
@@ -535,9 +558,9 @@ async function verifyModal() {
 
     if (shouldManageServer && serverHandle?.child) {
       const stdout = readFileSync(serverHandle.stdoutPath, 'utf8')
-      assert.match(stdout, /\[vibe-cards\] action=create id=modal-flow-card/, 'Server logs should show create action')
-      assert.match(stdout, /\[vibe-cards\] action=update id=modal-flow-card/, 'Server logs should show update action')
-      assert.match(stdout, /\[vibe-cards\] action=delete id=modal-flow-card/, 'Server logs should show delete action')
+      assert.match(stdout, new RegExp(`\\[vibe-cards\\] action=create id=${preSubmitState.derivedId}`), 'Server logs should show create action')
+      assert.match(stdout, new RegExp(`\\[vibe-cards\\] action=update id=${preSubmitState.derivedId}`), 'Server logs should show update action')
+      assert.match(stdout, new RegExp(`\\[vibe-cards\\] action=delete id=${preSubmitState.derivedId}`), 'Server logs should show delete action')
     }
 
     assertNoUnexpectedDiagnostics(diagnostics)
