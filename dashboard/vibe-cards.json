@@ -1,3 +1,20 @@
 {
-  "cards": []
+  "cards": [
+    {
+      "id": "seed-card-1",
+      "title": "Seed Card",
+      "description": "Baseline card for verification",
+      "lane": "backlog",
+      "status": "open",
+      "priority": "medium",
+      "tags": [
+        "seed"
+      ],
+      "metadata": {
+        "source": "verify-script"
+      },
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    }
+  ]
 }

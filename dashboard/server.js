@@ -780,6 +780,7 @@ app.get('/terminal-page/:name', (req, res) => {
     <span id="bar-title">${cfg.name}</span>
     <span id="bar-session">${sessionName}</span>
     <span id="bar-spacer"></span>
+    <button class="bar-btn" id="copy-btn" onclick="copyTerminalSelection()" title="Copy selection (Cmd+C)">⌘C Copy</button>
     <button class="bar-btn" id="paste-btn" onclick="pasteFromClipboard()" title="Paste (Cmd+V)">⌘V Paste</button>
     <button class="bar-btn" id="settings-btn" onclick="toggleSettings(event)">⚙</button>
     <div id="settings-panel">
@@ -822,7 +823,7 @@ app.get('/terminal-page/:name', (req, res) => {
         ttydPort=data.port
         const url=IS_LOCAL
           ?'http://localhost:'+data.port+'/'
-          :'http://localhost:'+data.port+'/?arg='+encodeURIComponent(SESSION)
+          :'http://localhost:'+data.port+'/?arg='+encodeURIComponent(SESSION+':0')
         document.getElementById('ttyd-frame').src=url
         // Connect our own WS for paste injection
         connectPasteWs(data.port)
@@ -876,6 +877,28 @@ app.get('/terminal-page/:name', (req, res) => {
         // Fallback: focus iframe and let user Cmd+V natively
         document.getElementById('ttyd-frame').focus()
         alert('Clipboard access denied. Click inside the terminal and use Cmd+V.')
+      }
+    }
+
+    async function copyTerminalSelection(){
+      const iframe=document.getElementById('ttyd-frame')
+      try{ iframe.focus() }catch{}
+
+      let selected=''
+      try{
+        selected=iframe.contentWindow?.term?.getSelection?.() ?? ''
+      }catch{}
+
+      if(!selected){
+        alert('Select text inside the terminal first, then click Copy.')
+        return
+      }
+
+      try{
+        await navigator.clipboard.writeText(selected)
+      }catch(e){
+        console.warn('[copy] clipboard write failed:',e.message)
+        alert('Clipboard write failed. Grant clipboard permission for this page and try again.')
       }
     }
 
