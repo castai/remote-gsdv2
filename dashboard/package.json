@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "verify:vibe-cards:board": "node scripts/verify-vibe-cards-board.mjs --mode=render",
+    "verify:vibe-cards:board:drag": "node scripts/verify-vibe-cards-board.mjs --mode=drag",
+    "verify:vibe-cards:board:modal": "node scripts/verify-vibe-cards-board.mjs --mode=modal"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -13,5 +16,8 @@
     "ioredis": "^5.10.1",
     "node-pty": "^1.1.0",
     "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.52.0"
   }
 }

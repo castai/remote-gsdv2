@@ -1,0 +1,31 @@
+{
+  "cards": [
+    {
+      "id": "vibe-card-additional-features-and-work",
+      "title": "vibe card additional features and work",
+      "description": null,
+      "status": "open",
+      "lane": "done",
+      "priority": "medium",
+      "tags": [
+        "gsd-control-project"
+      ],
+      "metadata": {
+        "color": "purple",
+        "instanceName": "remote_gsdv2",
+        "sessionName": "shell",
+        "jiraUrl": null,
+        "linkedQuickTaskId": 2
+      },
+      "comments": [
+        {
+          "id": "c-1778612559144-3l8yu",
+          "text": "│  Closed out M004-z40dyy (Vibe Cards milestone) then vibed a full polish pass on the feature. Fixed title\n│  input clearing on modal open (missing oninput handlers + focus guard in renderVibeModal). Replaced\n│  VIBE_LANES with 1-per-phase lanes matching board column names exactly (Discussing→Done), added legacy remap\n│  for old lane ids. Removed status field from modal and card renderer. Fixed create/delete not closing the\n│  modal (saving/deleting flags were still true when closeVibeModal was called — moved close to finally after\n│  clearing flags). Removed Card ID field from modal. Added hide/unhide for milestone cards and quick chips\n│  with localStorage persistence and \"Show hidden (N)\" header toggle. Fixed instance delete X button\n│  (e.currentTarget was null for inline onclick — switched to addEventListener). Added native macOS folder\n│  picker for Add Instance via /api/pick-folder osascript endpoint. Added Vibe Card comments: POST/DELETE\n│  /api/vibe-cards/:id/comments backend, full comments thread in modal below description (append-only,\n│  timestamped, hover-delete). Moved \"+ Vibe\" button to main header. Fixed drag to empty Researching/Planning\n│  columns by moving dragover/drop listeners to colEl with min-height. Fixed all field-input width by adding\n│  width:100% box-sizing:border-box to .field-input.",
+          "createdAt": "2026-05-12T19:02:39.144Z"
+        }
+      ],
+      "createdAt": "2026-05-12T18:24:33.207Z",
+      "updatedAt": "2026-05-12T19:28:30.448Z"
+    }
+  ]
+}

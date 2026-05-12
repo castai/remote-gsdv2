@@ -10,6 +10,10 @@
  * POST   /api/terminal/:name/session — create a named tmux session
  * GET    /api/terminal-prefs         — read terminal preferences
  * POST   /api/terminal-prefs        — update terminal preferences (restarts ttyd)
+ * GET    /api/vibe-cards             — read persisted Vibe Cards
+ * POST   /api/vibe-cards             — create a persisted Vibe Card
+ * PATCH  /api/vibe-cards/:id         — update a persisted Vibe Card
+ * DELETE /api/vibe-cards/:id         — delete a persisted Vibe Card
  * GET    /terminal-page/:name        — full-page terminal HTML (new tab)
  *
  * Real-time architecture:
@@ -31,12 +35,13 @@ import { deriveInstance } from './derive.js'
 
 const __dir = dirname(fileURLToPath(import.meta.url))
 
-const KUBECTL        = '/opt/homebrew/bin/kubectl'
-const TTYD           = '/opt/homebrew/bin/ttyd'
-const PORT           = parseInt(process.env.PORT ?? '3001', 10)
-const POLL_MS        = parseInt(process.env.POLL_INTERVAL_MS ?? '5000', 10)
-const INSTANCES_FILE = resolve(process.env.INSTANCES_FILE ?? resolve(__dir, 'instances.json'))
-const PREFS_FILE     = resolve(__dir, 'terminal-prefs.json')
+const KUBECTL         = '/opt/homebrew/bin/kubectl'
+const TTYD            = '/opt/homebrew/bin/ttyd'
+const PORT            = parseInt(process.env.PORT ?? '3001', 10)
+const POLL_MS         = parseInt(process.env.POLL_INTERVAL_MS ?? '5000', 10)
+const INSTANCES_FILE  = resolve(process.env.INSTANCES_FILE ?? resolve(__dir, 'instances.json'))
+const PREFS_FILE      = resolve(__dir, 'terminal-prefs.json')
+const VIBE_CARDS_FILE = resolve(__dir, 'vibe-cards.json')
 
 // ─── Terminal preferences ─────────────────────────────────────────────────────
 
@@ -73,6 +78,192 @@ function saveInstances() { writeFileSync(INSTANCES_FILE, JSON.stringify(instance
 
 const instanceConfigs = loadInstances()
 console.log(`[server] Loaded ${instanceConfigs.length} instance(s):`, instanceConfigs.map(i => i.name))
+
+// ─── Vibe Card persistence ────────────────────────────────────────────────────
+
+function isPlainObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function normalizeCardTimestamps(card, nowIso) {
+  return {
+    ...card,
+    createdAt: typeof card.createdAt === 'string' && card.createdAt ? card.createdAt : nowIso,
+    updatedAt: typeof card.updatedAt === 'string' && card.updatedAt ? card.updatedAt : nowIso
+  }
+}
+
+function validateCardShape(card, { partial = false } = {}) {
+  if (!isPlainObject(card)) return 'card must be an object'
+
+  const allowedKeys = new Set(['id', 'title', 'description', 'status', 'lane', 'priority', 'tags', 'metadata', 'comments', 'createdAt', 'updatedAt'])
+  for (const key of Object.keys(card)) {
+    if (!allowedKeys.has(key)) return `unexpected field '${key}'`
+  }
+
+  const requiredKeys = ['id', 'title']
+  if (!partial) {
+    for (const key of requiredKeys) {
+      if (!(key in card)) return `${key} is required`
+    }
+  }
+
+  if ('id' in card && (typeof card.id !== 'string' || !card.id.trim())) return 'id must be a non-empty string'
+  if ('title' in card && (typeof card.title !== 'string' || !card.title.trim())) return 'title must be a non-empty string'
+  if ('description' in card && card.description !== null && typeof card.description !== 'string') return 'description must be a string or null'
+  if ('status' in card && card.status !== null && typeof card.status !== 'string') return 'status must be a string or null'
+  if ('lane' in card && card.lane !== null && typeof card.lane !== 'string') return 'lane must be a string or null'
+  if ('priority' in card && card.priority !== null && typeof card.priority !== 'string') return 'priority must be a string or null'
+  if ('createdAt' in card && (typeof card.createdAt !== 'string' || !card.createdAt)) return 'createdAt must be a non-empty string'
+  if ('updatedAt' in card && (typeof card.updatedAt !== 'string' || !card.updatedAt)) return 'updatedAt must be a non-empty string'
+
+  if ('tags' in card) {
+    if (!Array.isArray(card.tags) || !card.tags.every(tag => typeof tag === 'string')) {
+      return 'tags must be an array of strings'
+    }
+  }
+
+  if ('metadata' in card && card.metadata !== null && !isPlainObject(card.metadata)) {
+    return 'metadata must be an object or null'
+  }
+
+  return null
+}
+
+function validateVibeCardsPayload(payload) {
+  if (!isPlainObject(payload)) return { error: 'vibe-cards.json must contain an object payload' }
+  if (!Array.isArray(payload.cards)) return { error: 'vibe-cards.json must contain a cards array' }
+
+  const nowIso = new Date().toISOString()
+  const normalizedCards = []
+  const ids = new Set()
+
+  for (const [index, rawCard] of payload.cards.entries()) {
+    const error = validateCardShape(rawCard)
+    if (error) return { error: `cards[${index}]: ${error}` }
+
+    const card = normalizeCardTimestamps(rawCard, nowIso)
+    const cardId = card.id.trim()
+    if (ids.has(cardId)) return { error: `cards[${index}]: duplicate id '${cardId}'` }
+    ids.add(cardId)
+
+    normalizedCards.push({
+      id: cardId,
+      title: card.title.trim(),
+      description: card.description ?? null,
+      status: card.status ?? null,
+      lane: card.lane ?? null,
+      priority: card.priority ?? null,
+      tags: card.tags ?? [],
+      metadata: card.metadata ?? {},
+      comments: Array.isArray(card.comments) ? card.comments : [],
+      createdAt: card.createdAt,
+      updatedAt: card.updatedAt
+    })
+  }
+
+  return { cards: normalizedCards }
+}
+
+function createDefaultVibeCardsFile() {
+  const payload = { cards: [] }
+  writeFileSync(VIBE_CARDS_FILE, JSON.stringify(payload, null, 2) + '\n')
+  console.log(`[vibe-cards] initialized ${VIBE_CARDS_FILE} with 0 card(s)`)
+  return payload
+}
+
+function loadVibeCards() {
+  if (!existsSync(VIBE_CARDS_FILE)) return createDefaultVibeCardsFile()
+
+  try {
+    const parsed = JSON.parse(readFileSync(VIBE_CARDS_FILE, 'utf8'))
+    const validated = validateVibeCardsPayload(parsed)
+    if (validated.error) {
+      console.error(`[vibe-cards] startup validation failed: ${validated.error}`)
+      throw new Error(validated.error)
+    }
+    console.log(`[vibe-cards] loaded ${validated.cards.length} card(s) from ${VIBE_CARDS_FILE}`)
+    return { cards: validated.cards }
+  } catch (error) {
+    console.error(`[vibe-cards] startup load failed: ${error.message}`)
+    process.exit(1)
+  }
+}
+
+function persistVibeCards(action, cardId) {
+  try {
+    writeFileSync(VIBE_CARDS_FILE, JSON.stringify(vibeCardStore, null, 2) + '\n')
+    console.log(`[vibe-cards] persisted action=${action} id=${cardId} total=${vibeCardStore.cards.length}`)
+  } catch (error) {
+    console.error(`[vibe-cards] persist failed action=${action} id=${cardId}: ${error.message}`)
+    throw error
+  }
+}
+
+function serializeCard(card) {
+  return {
+    id: card.id,
+    title: card.title,
+    description: card.description,
+    status: card.status,
+    lane: card.lane,
+    priority: card.priority,
+    tags: card.tags,
+    metadata: card.metadata,
+    comments: Array.isArray(card.comments) ? card.comments : [],
+    createdAt: card.createdAt,
+    updatedAt: card.updatedAt
+  }
+}
+
+function buildCardFromCreate(body) {
+  const validationError = validateCardShape(body)
+  if (validationError) return { error: validationError }
+
+  const nowIso = new Date().toISOString()
+  const normalized = normalizeCardTimestamps({
+    ...body,
+    id: body.id.trim(),
+    title: body.title.trim(),
+    description: body.description ?? null,
+    status: body.status ?? null,
+    lane: body.lane ?? null,
+    priority: body.priority ?? null,
+    tags: body.tags ?? [],
+    metadata: body.metadata ?? {},
+    comments: [],
+    createdAt: body.createdAt ?? nowIso,
+    updatedAt: body.updatedAt ?? nowIso
+  }, nowIso)
+
+  return { card: serializeCard(normalized) }
+}
+
+function applyCardPatch(existingCard, patch) {
+  if (!isPlainObject(patch)) return { error: 'patch body must be an object' }
+  if ('id' in patch) return { error: 'id cannot be updated' }
+
+  const validationError = validateCardShape(patch, { partial: true })
+  if (validationError) return { error: validationError }
+
+  const nextCard = serializeCard({
+    ...existingCard,
+    ...patch,
+    title: typeof patch.title === 'string' ? patch.title.trim() : existingCard.title,
+    description: Object.prototype.hasOwnProperty.call(patch, 'description') ? patch.description : existingCard.description,
+    status: Object.prototype.hasOwnProperty.call(patch, 'status') ? patch.status : existingCard.status,
+    lane: Object.prototype.hasOwnProperty.call(patch, 'lane') ? patch.lane : existingCard.lane,
+    priority: Object.prototype.hasOwnProperty.call(patch, 'priority') ? patch.priority : existingCard.priority,
+    tags: Object.prototype.hasOwnProperty.call(patch, 'tags') ? patch.tags : existingCard.tags,
+    metadata: Object.prototype.hasOwnProperty.call(patch, 'metadata') ? patch.metadata : existingCard.metadata,
+    comments: existingCard.comments ?? [],
+    updatedAt: new Date().toISOString()
+  })
+
+  return { card: nextCard }
+}
+
+const vibeCardStore = loadVibeCards()
 
 // ─── tmux session discovery ───────────────────────────────────────────────────
 
@@ -398,6 +589,28 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: instances.every(i => i.ok), instances })
 })
 
+/**
+ * GET /api/pick-folder
+ * Opens a native macOS folder picker dialog and returns the selected path.
+ * Only works on macOS (uses osascript). Returns { path } or { error }.
+ */
+app.get('/api/pick-folder', (req, res) => {
+  try {
+    const script = `
+      set theFolder to choose folder with prompt "Select project directory"
+      POSIX path of theFolder
+    `
+    const result = execFileSync('osascript', ['-e', script], { encoding: 'utf8', timeout: 60000 }).trim()
+    res.json({ path: result.replace(/\/$/, '') })
+  } catch (err) {
+    if (err.stderr?.includes('User canceled') || err.message?.includes('User canceled') || err.status === 1) {
+      res.json({ cancelled: true })
+    } else {
+      res.status(500).json({ error: err.message })
+    }
+  }
+})
+
 app.get('/api/terminal-prefs', (req, res) => res.json(terminalPrefs))
 
 app.post('/api/terminal-prefs', (req, res) => {
@@ -432,6 +645,125 @@ app.post('/api/terminal-prefs', (req, res) => {
   }
 
   res.json({ ok: true, prefs: terminalPrefs })
+})
+
+app.get('/api/vibe-cards', (req, res) => {
+  res.json({ cards: vibeCardStore.cards.map(serializeCard) })
+})
+
+app.post('/api/vibe-cards', (req, res) => {
+  const result = buildCardFromCreate(req.body ?? {})
+  if (result.error) return res.status(400).json({ error: result.error })
+
+  if (vibeCardStore.cards.some(card => card.id === result.card.id)) {
+    return res.status(409).json({ error: `card '${result.card.id}' already exists` })
+  }
+
+  vibeCardStore.cards.push(result.card)
+
+  try {
+    persistVibeCards('create', result.card.id)
+    console.log(`[vibe-cards] action=create id=${result.card.id}`)
+    res.status(201).json({ card: serializeCard(result.card) })
+  } catch {
+    vibeCardStore.cards = vibeCardStore.cards.filter(card => card.id !== result.card.id)
+    res.status(500).json({ error: 'failed to persist vibe card' })
+  }
+})
+
+app.patch('/api/vibe-cards/:id', (req, res) => {
+  const index = vibeCardStore.cards.findIndex(card => card.id === req.params.id)
+  if (index === -1) return res.status(404).json({ error: 'card not found' })
+
+  const result = applyCardPatch(vibeCardStore.cards[index], req.body ?? {})
+  if (result.error) return res.status(400).json({ error: result.error })
+
+  const previousCard = vibeCardStore.cards[index]
+  vibeCardStore.cards[index] = result.card
+
+  try {
+    persistVibeCards('update', result.card.id)
+    console.log(`[vibe-cards] action=update id=${result.card.id}`)
+    res.json({ card: serializeCard(result.card) })
+  } catch {
+    vibeCardStore.cards[index] = previousCard
+    res.status(500).json({ error: 'failed to persist vibe card' })
+  }
+})
+
+app.delete('/api/vibe-cards/:id', (req, res) => {
+  const index = vibeCardStore.cards.findIndex(card => card.id === req.params.id)
+  if (index === -1) return res.status(404).json({ error: 'card not found' })
+
+  const [removedCard] = vibeCardStore.cards.splice(index, 1)
+
+  try {
+    persistVibeCards('delete', removedCard.id)
+    console.log(`[vibe-cards] action=delete id=${removedCard.id}`)
+    res.json({ ok: true, id: removedCard.id })
+  } catch {
+    vibeCardStore.cards.splice(index, 0, removedCard)
+    res.status(500).json({ error: 'failed to persist vibe card' })
+  }
+})
+
+/**
+ * POST /api/vibe-cards/:id/comments
+ * Body: { text: string }
+ * Appends a comment to the card. Returns { ok, comment, card }.
+ */
+app.post('/api/vibe-cards/:id/comments', (req, res) => {
+  const index = vibeCardStore.cards.findIndex(card => card.id === req.params.id)
+  if (index === -1) return res.status(404).json({ error: 'card not found' })
+
+  const text = (req.body?.text ?? '').trim()
+  if (!text) return res.status(400).json({ error: 'comment text is required' })
+
+  const comment = {
+    id: `c-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    text,
+    createdAt: new Date().toISOString()
+  }
+
+  const card = vibeCardStore.cards[index]
+  const previousComments = card.comments ?? []
+  card.comments = [...previousComments, comment]
+  card.updatedAt = new Date().toISOString()
+
+  try {
+    persistVibeCards('comment-add', card.id)
+    console.log(`[vibe-cards] action=comment-add id=${card.id} comment=${comment.id}`)
+    res.status(201).json({ ok: true, comment, card: serializeCard(card) })
+  } catch {
+    card.comments = previousComments
+    res.status(500).json({ error: 'failed to persist comment' })
+  }
+})
+
+/**
+ * DELETE /api/vibe-cards/:id/comments/:commentId
+ * Removes a single comment from the card.
+ */
+app.delete('/api/vibe-cards/:id/comments/:commentId', (req, res) => {
+  const index = vibeCardStore.cards.findIndex(card => card.id === req.params.id)
+  if (index === -1) return res.status(404).json({ error: 'card not found' })
+
+  const card = vibeCardStore.cards[index]
+  const previousComments = card.comments ?? []
+  const commentIndex = previousComments.findIndex(c => c.id === req.params.commentId)
+  if (commentIndex === -1) return res.status(404).json({ error: 'comment not found' })
+
+  card.comments = previousComments.filter(c => c.id !== req.params.commentId)
+  card.updatedAt = new Date().toISOString()
+
+  try {
+    persistVibeCards('comment-delete', card.id)
+    console.log(`[vibe-cards] action=comment-delete id=${card.id} comment=${req.params.commentId}`)
+    res.json({ ok: true })
+  } catch {
+    card.comments = previousComments
+    res.status(500).json({ error: 'failed to persist comment deletion' })
+  }
 })
 
 app.get('/api/terminal/:name', (req, res) => {
@@ -533,6 +865,7 @@ app.get('/terminal-page/:name', (req, res) => {
     <span id="bar-title">${cfg.name}</span>
     <span id="bar-session">${sessionName}</span>
     <span id="bar-spacer"></span>
+    <button class="bar-btn" id="copy-btn" onclick="copyTerminalSelection()" title="Copy selection (Cmd+C)">⌘C Copy</button>
     <button class="bar-btn" id="paste-btn" onclick="pasteFromClipboard()" title="Paste (Cmd+V)">⌘V Paste</button>
     <button class="bar-btn" id="settings-btn" onclick="toggleSettings(event)">⚙</button>
     <div id="settings-panel">
@@ -575,7 +908,7 @@ app.get('/terminal-page/:name', (req, res) => {
         ttydPort=data.port
         const url=IS_LOCAL
           ?'http://localhost:'+data.port+'/'
-          :'http://localhost:'+data.port+'/?arg='+encodeURIComponent(SESSION)
+          :'http://localhost:'+data.port+'/?arg='+encodeURIComponent(SESSION+':0')
         document.getElementById('ttyd-frame').src=url
         // Connect our own WS for paste injection
         connectPasteWs(data.port)
@@ -629,6 +962,28 @@ app.get('/terminal-page/:name', (req, res) => {
         // Fallback: focus iframe and let user Cmd+V natively
         document.getElementById('ttyd-frame').focus()
         alert('Clipboard access denied. Click inside the terminal and use Cmd+V.')
+      }
+    }
+
+    async function copyTerminalSelection(){
+      const iframe=document.getElementById('ttyd-frame')
+      try{ iframe.focus() }catch{}
+
+      let selected=''
+      try{
+        selected=iframe.contentWindow?.term?.getSelection?.() ?? ''
+      }catch{}
+
+      if(!selected){
+        alert('Select text inside the terminal first, then click Copy.')
+        return
+      }
+
+      try{
+        await navigator.clipboard.writeText(selected)
+      }catch(e){
+        console.warn('[copy] clipboard write failed:',e.message)
+        alert('Clipboard write failed. Grant clipboard permission for this page and try again.')
       }
     }
 

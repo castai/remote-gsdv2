@@ -27,6 +27,13 @@
       --active-col:  #1e2535;
 
       --header-h:    52px;
+
+      --vibe-discussing:   #7c3aed;
+      --vibe-researching:  #6366f1;
+      --vibe-planning:     #0ea5e9;
+      --vibe-executing:    #f59e0b;
+      --vibe-validating:   #f97316;
+      --vibe-done:         #22c55e;
     }
 
     body {
@@ -289,6 +296,8 @@
       outline: none;
       font-family: inherit;
       transition: border-color 0.15s;
+      width: 100%;
+      box-sizing: border-box;
     }
 
     .field-input:focus { border-color: var(--accent); }
@@ -561,6 +570,7 @@
       display: flex;
       flex-direction: column;
       gap: 7px;
+      min-height: 80px;
     }
 
     /* ── Milestone card ───────────────────────────────────────── */
@@ -577,6 +587,154 @@
     .card:hover {
       border-color: var(--accent);
       transform: translateY(-1px);
+    }
+
+    .vibe-card {
+      background: linear-gradient(180deg, rgba(124,58,237,0.14), rgba(26,29,39,0.96));
+      border: 1px dashed rgba(167,139,250,0.55);
+      border-radius: 8px;
+      padding: 11px 12px;
+      position: relative;
+      transition: border-color 0.15s, transform 0.1s, opacity 0.15s;
+      cursor: grab;
+    }
+
+    .vibe-card:hover {
+      border-color: #c4b5fd;
+      transform: translateY(-1px);
+    }
+
+    .vibe-card.vibe-merged {
+      border-color: rgba(56,189,248,0.45);
+      background: linear-gradient(180deg, rgba(56,189,248,0.10), rgba(26,29,39,0.96));
+    }
+    .vibe-card.vibe-merged:hover {
+      border-color: #38bdf8;
+    }
+
+    .vibe-chip-linked {
+      background: rgba(56,189,248,0.12);
+      color: #7dd3fc;
+      border-radius: 4px;
+    }
+
+    .vibe-card.dragging {
+      opacity: 0.5;
+      cursor: grabbing;
+    }
+
+    .vibe-card.saving {
+      border-style: solid;
+      box-shadow: 0 0 0 1px rgba(196,181,253,0.45);
+    }
+
+    .vibe-card::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 4px; bottom: 4px;
+      width: 3px;
+      border-radius: 3px 0 0 3px;
+      background: var(--vibe-lane-color, var(--vibe-discussing));
+    }
+
+    .vibe-card-top {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .vibe-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #ddd6fe;
+      background: rgba(124,58,237,0.18);
+      border: 1px solid rgba(167,139,250,0.32);
+      border-radius: 4px;
+      padding: 1px 6px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .vibe-title-wrap {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .vibe-card-title {
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.4;
+      color: var(--text);
+    }
+
+    .vibe-card-description {
+      font-size: 11px;
+      line-height: 1.5;
+      color: #cbd5e1;
+      margin-bottom: 8px;
+      white-space: pre-wrap;
+    }
+
+    .vibe-card-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .vibe-chip {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 2px 7px;
+      font-size: 10px;
+      font-weight: 500;
+      border: 1px solid rgba(148,163,184,0.22);
+      background: rgba(15,17,23,0.35);
+      color: #cbd5e1;
+    }
+
+    .vibe-chip.lane {
+      color: #ddd6fe;
+      border-color: rgba(167,139,250,0.35);
+    }
+
+    .vibe-chip.priority-high {
+      color: #fecaca;
+      border-color: rgba(248,113,113,0.35);
+    }
+
+    .vibe-chip.priority-medium {
+      color: #fde68a;
+      border-color: rgba(245,158,11,0.35);
+    }
+
+    .vibe-chip.priority-low {
+      color: #bfdbfe;
+      border-color: rgba(96,165,250,0.35);
+    }
+
+    .vibe-error-banner {
+      background: #2a0a0a;
+      border: 1px solid rgba(239,68,68,0.32);
+      color: #fca5a5;
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 11px;
+      margin-bottom: 8px;
+    }
+
+    .phase-column.drop-target .col-cards {
+      background: rgba(99,102,241,0.08);
     }
 
     .card.done {
@@ -628,6 +786,65 @@
       align-items: center;
       gap: 6px;
       flex-wrap: wrap;
+    }
+
+    /* Card hide button */
+    .card-hide-btn {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      width: 18px;
+      height: 18px;
+      border: none;
+      background: none;
+      color: var(--muted);
+      cursor: pointer;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      opacity: 0;
+      transition: opacity 0.15s, background 0.15s;
+      padding: 0;
+      line-height: 1;
+    }
+    .card:hover .card-hide-btn,
+    .quick-chip:hover .card-hide-btn {
+      opacity: 1;
+    }
+    .card-hide-btn:hover {
+      background: rgba(255,255,255,0.08);
+      color: var(--text);
+    }
+    .card.card-hidden {
+      opacity: 0.35;
+      filter: grayscale(0.5);
+    }
+    .quick-chip.card-hidden {
+      opacity: 0.35;
+      filter: grayscale(0.5);
+    }
+
+    /* Show hidden toggle button */
+    #show-hidden-btn {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: none;
+      color: var(--muted);
+      cursor: pointer;
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: background 0.15s, color 0.15s;
+    }
+    #show-hidden-btn:hover,
+    #show-hidden-btn.active {
+      background: rgba(255,255,255,0.07);
+      color: var(--text);
     }
 
     /* Auto-mode running badge */
@@ -1105,6 +1322,26 @@
 
     .quick-chip:hover { border-color: var(--accent); }
 
+    .quick-chip-wip {
+      border-color: rgba(251,191,36,0.35);
+      background: rgba(251,191,36,0.06);
+    }
+    .quick-chip-wip:hover { border-color: rgba(251,191,36,0.7); }
+
+    .quick-wip-badge {
+      display: inline-block;
+      font-size: 9px;
+      font-weight: 600;
+      color: #fbbf24;
+      background: rgba(251,191,36,0.15);
+      border-radius: 3px;
+      padding: 1px 5px;
+      margin-left: 5px;
+      vertical-align: middle;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
     .quick-chip-icon {
       font-size: 12px;
       flex-shrink: 0;
@@ -1202,6 +1439,185 @@
       font-size: 11px;
       text-align: center;
     }
+
+    /* ── Vibe modal ───────────────────────────────────────────── */
+    .vibe-add-btn {
+      font-size: 11px;
+      font-weight: 500;
+      color: #ddd6fe;
+      background: rgba(124,58,237,0.18);
+      border: 1px solid rgba(167,139,250,0.35);
+      border-radius: 5px;
+      padding: 4px 10px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      white-space: nowrap;
+    }
+
+    .vibe-add-btn:hover {
+      border-color: #c4b5fd;
+      background: rgba(124,58,237,0.28);
+    }
+
+    #vibe-modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.68);
+      z-index: 320;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    #vibe-modal-overlay.visible { display: flex; }
+
+    #vibe-modal {
+      width: min(760px, 100%);
+      max-height: calc(100vh - 40px);
+      overflow-y: auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      box-shadow: 0 18px 40px rgba(0,0,0,0.45);
+    }
+
+    .vibe-modal-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .vibe-modal-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .vibe-modal-subtitle {
+      margin-top: 5px;
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .vibe-modal-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .vibe-modal-grid .field-group.full-width {
+      grid-column: 1 / -1;
+    }
+
+    .field-input[readonly] {
+      opacity: 0.75;
+      cursor: default;
+    }
+
+    .field-input:disabled,
+    .btn-cancel:disabled {
+      opacity: 0.55;
+      cursor: default;
+    }
+
+    .field-textarea {
+      min-height: 90px;
+      resize: vertical;
+    }
+
+    /* Comments thread */
+    .vibe-comment {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 7px 10px;
+      background: var(--surface2);
+      border-radius: 6px;
+      margin-bottom: 5px;
+      position: relative;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .vibe-comment-text {
+      font-size: 12px;
+      color: var(--text);
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.5;
+      padding-right: 22px;
+    }
+    .vibe-comment-meta {
+      font-size: 10px;
+      color: var(--muted);
+    }
+    .vibe-comment-delete {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 11px;
+      padding: 0 2px;
+      opacity: 0;
+      transition: opacity 0.15s;
+      line-height: 1;
+    }
+    .vibe-comment:hover .vibe-comment-delete { opacity: 1; }
+    .vibe-comment-delete:hover { color: var(--errored); }
+
+    .modal-error {
+      display: none;
+      font-size: 11px;
+      color: #fca5a5;
+      background: #2a0a0a;
+      border: 1px solid rgba(239,68,68,0.32);
+      border-radius: 6px;
+      padding: 8px 10px;
+      line-height: 1.5;
+    }
+
+    .modal-error.visible { display: block; }
+
+    .modal-actions.spread {
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .modal-actions-right {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .btn-danger {
+      background: rgba(239,68,68,0.16);
+      border: 1px solid rgba(239,68,68,0.35);
+      border-radius: 5px;
+      color: #fca5a5;
+      font-size: 12px;
+      padding: 6px 14px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+
+    .btn-danger:hover {
+      background: rgba(239,68,68,0.24);
+      border-color: rgba(252,165,165,0.55);
+    }
+
+    .btn-danger:disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
   </style>
 </head>
 <body>
@@ -1231,6 +1647,8 @@
         <option value="0">All time</option>
       </select>
     </div>
+    <button id="show-hidden-btn" onclick="toggleShowHidden()" style="display:none">Show hidden</button>
+    <button class="vibe-add-btn" type="button" onclick="openCreateVibeModal()">+ Vibe</button>
     <div class="status-dot" id="status-dot"></div>
     <span id="last-updated">—</span>
   </div>
@@ -1259,13 +1677,123 @@
     </div>
     <div class="field-group">
       <label class="field-label" for="ai-path">Project directory</label>
-      <input class="field-input" id="ai-path" type="text" placeholder="/Users/you/projects/myapp" autocomplete="off" spellcheck="false" />
+      <div style="display:flex;gap:6px;align-items:center">
+        <input class="field-input" id="ai-path" type="text" placeholder="/Users/you/projects/myapp" autocomplete="off" spellcheck="false" style="flex:1;min-width:0" />
+        <button type="button" id="ai-browse-btn" onclick="browseForFolder()" style="flex-shrink:0;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);cursor:pointer;font-size:12px;white-space:nowrap">Browse…</button>
+      </div>
       <span class="field-hint">Must contain a <code>.gsd/</code> directory</span>
     </div>
     <div id="add-instance-error"></div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeAddInstance()">Cancel</button>
       <button class="btn-primary" id="ai-submit" onclick="submitAddInstance()">Add instance</button>
+    </div>
+  </div>
+</div>
+
+<!-- Vibe card modal -->
+<div id="vibe-modal-overlay" onclick="maybeCloseVibeModal(event)">
+  <div id="vibe-modal">
+    <div class="vibe-modal-header">
+      <div>
+        <div class="vibe-modal-title" id="vibe-modal-title">New Vibe Card</div>
+        <div class="vibe-modal-subtitle" id="vibe-modal-subtitle">Create a board card with lane, session, label, and Jira metadata.</div>
+      </div>
+      <button class="panel-close" type="button" onclick="closeVibeModal()">✕</button>
+    </div>
+
+    <div class="vibe-modal-grid">
+      <div class="field-group full-width">
+        <label class="field-label" for="vibe-title">Title</label>
+        <input class="field-input" id="vibe-title" type="text" maxlength="160" autocomplete="off"
+          oninput="updateVibeModalValue('title', this.value)" />
+      </div>
+
+      <div class="field-group full-width">
+        <label class="field-label" for="vibe-description">Description</label>
+        <textarea class="field-input field-textarea" id="vibe-description" placeholder="Optional context" spellcheck="true"
+          oninput="updateVibeModalValue('description', this.value)"></textarea>
+      </div>
+
+      <div class="field-group full-width" id="vibe-comments-section">
+        <label class="field-label">Comments</label>
+        <div id="vibe-comments-list" style="width:100%"></div>
+        <div id="vibe-comments-compose" style="display:none;width:100%">
+          <textarea class="field-input field-textarea" id="vibe-comment-input" placeholder="Add a thought…" spellcheck="true" rows="2"
+            style="margin-top:6px;resize:vertical" oninput="renderVibeModal()"></textarea>
+          <div style="display:flex;justify-content:flex-end;margin-top:4px">
+            <button type="button" class="btn-primary" id="vibe-comment-submit" onclick="submitVibeComment()" style="font-size:11px;padding:4px 10px">Add</button>
+          </div>
+        </div>
+        <span class="field-hint" id="vibe-comments-hint"></span>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label" for="vibe-lane">Lane</label>
+        <select class="field-input" id="vibe-lane" onchange="updateVibeModalValue('lane', this.value)"></select>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label" for="vibe-priority">Priority</label>
+        <select class="field-input" id="vibe-priority" onchange="updateVibeModalValue('priority', this.value)">
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+        </select>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label" for="vibe-color">Color</label>
+        <select class="field-input" id="vibe-color" onchange="updateVibeModalValue('color', this.value)">
+          <option value="purple">Purple</option>
+          <option value="blue">Blue</option>
+          <option value="green">Green</option>
+          <option value="amber">Amber</option>
+          <option value="red">Red</option>
+          <option value="pink">Pink</option>
+        </select>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label" for="vibe-instance">Instance</label>
+        <select class="field-input" id="vibe-instance" onchange="updateVibeModalValue('instanceName', this.value)"></select>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label" for="vibe-session">Session</label>
+        <select class="field-input" id="vibe-session" onchange="updateVibeModalValue('sessionName', this.value)"></select>
+        <span class="field-hint" id="vibe-session-hint">Choose an instance to load sessions.</span>
+      </div>
+
+      <div class="field-group full-width">
+        <label class="field-label" for="vibe-jira">Jira URL</label>
+        <input class="field-input" id="vibe-jira" type="url" placeholder="https://jira.example.com/browse/PROJ-123" spellcheck="false"
+          oninput="updateVibeModalValue('jiraUrl', this.value)" />
+      </div>
+
+      <div class="field-group full-width">
+        <label class="field-label" for="vibe-labels">Labels</label>
+        <input class="field-input" id="vibe-labels" type="text" placeholder="design, blocker, qa" autocomplete="off"
+          oninput="updateVibeModalValue('labelsText', this.value)" />
+        <span class="field-hint">Comma-separated. Saved as the card tag array.</span>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label" for="vibe-quick-task-id">Linked quick task ID</label>
+        <input class="field-input" id="vibe-quick-task-id" type="text" placeholder="42" autocomplete="off"
+          oninput="updateVibeModalValue('linkedQuickTaskId', this.value)" />
+        <span class="field-hint">Enter the quick task number. Card merges with the task once it appears on the board.</span>
+      </div>
+    </div>
+
+    <div id="vibe-modal-error" class="modal-error"></div>
+
+    <div class="modal-actions spread">
+      <button class="btn-danger" id="vibe-delete" type="button" onclick="deleteVibeCard()">Delete</button>
+      <div class="modal-actions-right">
+        <button class="btn-cancel" id="vibe-cancel" type="button" onclick="closeVibeModal()">Cancel</button>
+        <button class="btn-primary" id="vibe-submit" type="button" onclick="submitVibeModal()">Create card</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1290,12 +1818,61 @@
 
 <script>
 const PHASES = ['Discussing','Researching','Planning','Executing','Validating','Done']
-const API    = 'http://localhost:3001/api/instances'
+const VIBE_LANES = [
+  { id: 'discussing',  phase: 'Discussing',  label: 'Discussing' },
+  { id: 'researching', phase: 'Researching', label: 'Researching' },
+  { id: 'planning',    phase: 'Planning',    label: 'Planning' },
+  { id: 'executing',   phase: 'Executing',   label: 'Executing' },
+  { id: 'validating',  phase: 'Validating',  label: 'Validating' },
+  { id: 'done',        phase: 'Done',        label: 'Done' }
+]
+const VIBE_LANE_PHASE = new Map(VIBE_LANES.map(lane => [lane.id, lane.phase]))
+const API    = `${window.location.origin}/api/instances`
 const POLL   = 5000
+const VIBE_PRIORITIES = ['low', 'medium', 'high']
+const VIBE_STATUSES = ['open', 'in_progress', 'blocked', 'done']
+
+const VIBE_COLORS = ['purple', 'blue', 'green', 'amber', 'red', 'pink']
+const VIBE_MODAL_DEFAULTS = {
+  title: '',
+  description: '',
+  lane: 'discussing',
+  priority: 'medium',
+  status: 'open',   // kept in data model for server compat, not shown in UI
+  color: 'purple',
+  instanceName: '',
+  sessionName: '',
+  jiraUrl: '',
+  labelsText: '',
+  linkedQuickTaskId: ''
+}
 
 let currentData = null
+let vibeCards = []
+let vibeCardsError = null
+let vibeCardsLoading = false
+let vibeCardSaveError = null
+let vibeCardDragId = null
+let vibeCardDragLane = null
+let vibeCardDragSnapshot = null
+let vibeCardSavingIds = new Set()
 let selectedCard = null
 let currentTab   = 'board'
+let vibeModalState = {
+  mode: 'create',
+  open: false,
+  cardId: '',
+  values: { ...VIBE_MODAL_DEFAULTS },
+  saving: false,
+  deleting: false,
+  error: '',
+  sessionsLoading: false,
+  sessionsError: '',
+  sessionOptions: [],
+  derivedId: '',
+  comments: [],
+  commentSaving: false
+}
 
 // ── Instance color palette ───────────────────────────────────────────────────
 // Assigned by order of first appearance. Colors are visually distinct on dark bg.
@@ -1319,6 +1896,30 @@ function getInstanceColor(name) {
 }
 
 // ── Add instance modal ───────────────────────────────────────────────────────
+
+async function browseForFolder() {
+  const btn = document.getElementById('ai-browse-btn')
+  const prev = btn.textContent
+  btn.textContent = 'Picking…'
+  btn.disabled = true
+  try {
+    const res  = await fetch('/api/pick-folder')
+    const data = await res.json()
+    if (data.cancelled) return
+    if (data.error) { alert(`Folder picker error: ${data.error}`); return }
+    document.getElementById('ai-path').value = data.path
+    // Auto-fill name from last path component if name is still empty
+    const nameInput = document.getElementById('ai-name')
+    if (!nameInput.value.trim()) {
+      nameInput.value = data.path.split('/').filter(Boolean).pop() || ''
+    }
+  } catch (err) {
+    alert(`Folder picker failed: ${err.message}`)
+  } finally {
+    btn.textContent = prev
+    btn.disabled = false
+  }
+}
 
 function openAddInstance() {
   document.getElementById('ai-name').value = ''
@@ -1393,14 +1994,26 @@ async function submitAddInstance() {
 }
 
 // Allow Enter key to submit
+// Enter submits the topmost open modal so card edit/create can share the same affordance.
 document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && document.getElementById('vibe-modal-overlay').classList.contains('visible')) {
+    const tag = e.target?.tagName
+    if (tag !== 'TEXTAREA') {
+      e.preventDefault()
+      submitVibeModal()
+      return
+    }
+  }
   if (e.key === 'Enter' && document.getElementById('add-instance-overlay').classList.contains('visible')) {
     submitAddInstance()
   }
   if (e.key === 'Escape') {
+    if (document.getElementById('vibe-modal-overlay').classList.contains('visible')) {
+      closeVibeModal()
+      return
+    }
     closeAddInstance()
     closePanel()
-    closeTerminal()
   }
 })
 
@@ -1517,9 +2130,9 @@ function renderSidebar(instances) {
       <span class="inst-node-dot" style="background:${icolor.color}"></span>
       <span class="inst-node-name" title="${esc(inst.name)}">${esc(inst.name)}</span>
       <span class="inst-node-type">${isPod ? 'pod' : 'local'}</span>
-      <button class="inst-delete-btn" title="Remove instance"
-        onclick="deleteInstance(event, ${JSON.stringify(inst.name)})">✕</button>
+      <button class="inst-delete-btn" title="Remove instance">✕</button>
     `
+    hdr.querySelector('.inst-delete-btn').addEventListener('click', e => deleteInstance(e, inst.name))
     node.appendChild(hdr)
 
     // Sessions list
@@ -1581,6 +2194,14 @@ async function fetchSidebarSessions(instName) {
   } catch {}
 }
 
+async function refreshBoardState(reason = 'manual') {
+  try {
+    await poll()
+  } catch (error) {
+    console.error(`[board] refresh failed reason=${reason}`, error)
+  }
+}
+
 function openTerminalTab(instName, sessionName) {
   const url = sessionName === 'shell'
     ? `/terminal-page/${encodeURIComponent(instName)}`
@@ -1639,6 +2260,55 @@ async function deleteInstance(e, instName) {
 
 // ── Days filter ──────────────────────────────────────────────────────────────
 
+// ── Hidden cards ─────────────────────────────────────────────────────────────
+
+const HIDDEN_CARDS_KEY = 'gsd-cp-hidden-cards'
+let hiddenCards = new Set(
+  (() => { try { return JSON.parse(localStorage.getItem(HIDDEN_CARDS_KEY) || '[]') } catch { return [] } })()
+)
+let showHiddenCards = false
+
+function persistHiddenCards() {
+  try { localStorage.setItem(HIDDEN_CARDS_KEY, JSON.stringify([...hiddenCards])) } catch {}
+}
+
+function cardHideKey(m) {
+  return `${m.id}::${m._instance?.name ?? ''}`
+}
+
+function toggleHideCard(key, event) {
+  event.stopPropagation()
+  if (hiddenCards.has(key)) {
+    hiddenCards.delete(key)
+  } else {
+    hiddenCards.add(key)
+  }
+  persistHiddenCards()
+  updateHideToggleButton()
+  if (currentData) render(currentData)
+}
+
+function toggleShowHidden() {
+  showHiddenCards = !showHiddenCards
+  updateHideToggleButton()
+  if (currentData) render(currentData)
+}
+
+function updateHideToggleButton() {
+  const btn = document.getElementById('show-hidden-btn')
+  if (!btn) return
+  const count = hiddenCards.size
+  if (count === 0) {
+    btn.style.display = 'none'
+    showHiddenCards = false
+  } else {
+    btn.style.display = 'inline-flex'
+    btn.textContent = showHiddenCards ? `Hide hidden (${count})` : `Show hidden (${count})`
+    btn.classList.toggle('active', showHiddenCards)
+  }
+}
+
+
 function getDoneDays() {
   return parseInt(document.getElementById('done-days').value, 10)
 }
@@ -1657,12 +2327,659 @@ function applyFilter() {
   if (currentData) render(currentData)
 }
 
+function slugifyVibeCardId(value) {
+  const base = String(value ?? '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return base || `vibe-${Date.now().toString(36)}`
+}
+
+function vibeCardMetadata(card) {
+  return card && typeof card.metadata === 'object' && card.metadata ? card.metadata : {}
+}
+
+function normalizeLabelsText(tags) {
+  return Array.isArray(tags) ? tags.join(', ') : ''
+}
+
+function parseLabelsInput(value) {
+  return [...new Set(
+    String(value ?? '')
+      .split(',')
+      .map(label => label.trim())
+      .filter(Boolean)
+  )]
+}
+
+function getInstanceOptions() {
+  return Array.isArray(currentData?.instances) ? currentData.instances.slice().sort((a, b) => a.name.localeCompare(b.name)) : []
+}
+
+function getVibeModalElements() {
+  return {
+    overlay: document.getElementById('vibe-modal-overlay'),
+    title: document.getElementById('vibe-modal-title'),
+    subtitle: document.getElementById('vibe-modal-subtitle'),
+    titleInput: document.getElementById('vibe-title'),
+    descriptionInput: document.getElementById('vibe-description'),
+    laneInput: document.getElementById('vibe-lane'),
+    priorityInput: document.getElementById('vibe-priority'),
+    colorInput: document.getElementById('vibe-color'),
+    instanceInput: document.getElementById('vibe-instance'),
+    sessionInput: document.getElementById('vibe-session'),
+    jiraInput: document.getElementById('vibe-jira'),
+    labelsInput: document.getElementById('vibe-labels'),
+    linkedQuickTaskIdInput: document.getElementById('vibe-quick-task-id'),
+    sessionHint: document.getElementById('vibe-session-hint'),
+    commentsList: document.getElementById('vibe-comments-list'),
+    commentsCompose: document.getElementById('vibe-comments-compose'),
+    commentsHint: document.getElementById('vibe-comments-hint'),
+    commentInput: document.getElementById('vibe-comment-input'),
+    commentSubmit: document.getElementById('vibe-comment-submit'),
+    error: document.getElementById('vibe-modal-error'),
+    submit: document.getElementById('vibe-submit'),
+    cancel: document.getElementById('vibe-cancel'),
+    deleteBtn: document.getElementById('vibe-delete')
+  }
+}
+
+function setVibeModalError(message) {
+  vibeModalState.error = message || ''
+  renderVibeModal()
+}
+
+function maybeCloseVibeModal(event) {
+  if (event.target === document.getElementById('vibe-modal-overlay')) closeVibeModal()
+}
+
+function closeVibeModal() {
+  if (vibeModalState.saving || vibeModalState.deleting) return
+  vibeModalState = {
+    mode: 'create',
+    open: false,
+    cardId: '',
+    values: { ...VIBE_MODAL_DEFAULTS },
+    saving: false,
+    deleting: false,
+    error: '',
+    sessionsLoading: false,
+    sessionsError: '',
+    sessionOptions: [],
+    derivedId: '',
+    comments: [],
+    commentSaving: false
+  }
+  renderVibeModal()
+}
+
+function buildVibeModalValues(card = null) {
+  const metadata = vibeCardMetadata(card)
+  return {
+    title: card?.title || '',
+    description: card?.description || '',
+    lane: getVibeLane(card),
+    priority: VIBE_PRIORITIES.includes(card?.priority) ? card.priority : 'medium',
+    status: VIBE_STATUSES.includes(card?.status) ? card.status : 'open', // preserve server value
+    color: VIBE_COLORS.includes(metadata.color) ? metadata.color : 'purple',
+    instanceName: typeof metadata.instanceName === 'string' ? metadata.instanceName : '',
+    sessionName: typeof metadata.sessionName === 'string' ? metadata.sessionName : '',
+    jiraUrl: typeof metadata.jiraUrl === 'string' ? metadata.jiraUrl : '',
+    labelsText: normalizeLabelsText(card?.tags),
+    linkedQuickTaskId: metadata.linkedQuickTaskId != null ? String(metadata.linkedQuickTaskId) : ''
+  }
+}
+
+function openCreateVibeModal() {
+  const defaults = { ...VIBE_MODAL_DEFAULTS }
+  const firstInstance = getInstanceOptions()[0]?.name || ''
+  defaults.instanceName = firstInstance
+  vibeModalState = {
+    mode: 'create',
+    open: true,
+    cardId: '',
+    values: defaults,
+    saving: false,
+    deleting: false,
+    error: '',
+    sessionsLoading: false,
+    sessionsError: '',
+    sessionOptions: [],
+    derivedId: slugifyVibeCardId(defaults.title),
+    comments: [],
+    commentSaving: false
+  }
+  renderVibeModal()
+  if (firstInstance) loadVibeModalSessions(firstInstance, '')
+  setTimeout(() => getVibeModalElements().titleInput?.focus(), 50)
+}
+
+function openEditVibeModal(card) {
+  const values = buildVibeModalValues(card)
+  vibeModalState = {
+    mode: 'edit',
+    open: true,
+    cardId: card.id,
+    values,
+    saving: false,
+    deleting: false,
+    error: '',
+    sessionsLoading: false,
+    sessionsError: '',
+    sessionOptions: [],
+    derivedId: card.id,
+    comments: Array.isArray(card.comments) ? card.comments : [],
+    commentSaving: false
+  }
+  renderVibeModal()
+  if (values.instanceName) loadVibeModalSessions(values.instanceName, values.sessionName)
+  setTimeout(() => getVibeModalElements().titleInput?.focus(), 50)
+}
+
+function updateVibeModalValue(field, value) {
+  if (!vibeModalState.open) return
+  vibeModalState.values = {
+    ...vibeModalState.values,
+    [field]: value
+  }
+  if (field === 'title' && vibeModalState.mode === 'create') {
+    vibeModalState.derivedId = slugifyVibeCardId(value)
+  }
+  if (field === 'instanceName') {
+    vibeModalState.values.sessionName = ''
+    vibeModalState.sessionOptions = []
+    vibeModalState.sessionsError = ''
+    renderVibeModal()
+    if (value) loadVibeModalSessions(value, '')
+    return
+  }
+  if (field === 'sessionName' || field === 'jiraUrl' || field === 'labelsText' || field === 'lane' || field === 'status' || field === 'priority' || field === 'color' || field === 'description' || field === 'title') {
+    vibeModalState.error = ''
+  }
+  renderVibeModal()
+}
+
+async function loadVibeModalSessions(instanceName, preferredSession = '') {
+  if (!instanceName) {
+    vibeModalState.sessionOptions = []
+    vibeModalState.sessionsLoading = false
+    vibeModalState.sessionsError = ''
+    renderVibeModal()
+    return
+  }
+
+  vibeModalState.sessionsLoading = true
+  vibeModalState.sessionsError = ''
+  renderVibeModal()
+
+  try {
+    const res = await fetch(`/api/terminal/${encodeURIComponent(instanceName)}`)
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
+    const options = Array.isArray(data.sessions) ? data.sessions.map(session => session.name) : []
+    if (data.type === 'local' && !options.includes('shell')) options.unshift('shell')
+    if (data.defaultSession && !options.includes(data.defaultSession)) options.unshift(data.defaultSession)
+    vibeModalState.sessionOptions = [...new Set(options.filter(Boolean))]
+    const nextSession = preferredSession && vibeModalState.sessionOptions.includes(preferredSession)
+      ? preferredSession
+      : (vibeModalState.values.sessionName && vibeModalState.sessionOptions.includes(vibeModalState.values.sessionName)
+        ? vibeModalState.values.sessionName
+        : vibeModalState.sessionOptions[0] || '')
+    vibeModalState.values = {
+      ...vibeModalState.values,
+      sessionName: nextSession
+    }
+  } catch (error) {
+    vibeModalState.sessionOptions = []
+    vibeModalState.sessionsError = error.message || 'Failed to load sessions'
+  } finally {
+    vibeModalState.sessionsLoading = false
+    renderVibeModal()
+  }
+}
+
+function validateVibeModal() {
+  const title = vibeModalState.values.title.trim()
+  if (!title) return 'Title is required'
+
+  const jiraUrl = vibeModalState.values.jiraUrl.trim()
+  if (jiraUrl) {
+    try {
+      new URL(jiraUrl)
+    } catch {
+      return 'Jira URL must be a valid absolute URL'
+    }
+  }
+
+  return ''
+}
+
+function buildVibeCardPayload() {
+  const values = vibeModalState.values
+  const title = values.title.trim()
+  const description = values.description.trim()
+  const jiraUrl = values.jiraUrl.trim()
+  const labels = parseLabelsInput(values.labelsText)
+  const payload = {
+    title,
+    description: description || null,
+    lane: values.lane,
+    priority: values.priority,
+    status: values.status,
+    tags: labels,
+    metadata: {
+      color: values.color,
+      instanceName: values.instanceName || null,
+      sessionName: values.sessionName || null,
+      jiraUrl: jiraUrl || null,
+      linkedQuickTaskId: values.linkedQuickTaskId.trim() ? Number(values.linkedQuickTaskId.trim()) || values.linkedQuickTaskId.trim() : null
+    }
+  }
+
+  if (vibeModalState.mode === 'create') {
+    payload.id = vibeModalState.derivedId || slugifyVibeCardId(title)
+  }
+
+  return payload
+}
+
+async function submitVibeModal() {
+  const validationError = validateVibeModal()
+  if (validationError) {
+    setVibeModalError(validationError)
+    return
+  }
+
+  vibeModalState.saving = true
+  vibeModalState.error = ''
+  renderVibeModal()
+
+  const payload = buildVibeCardPayload()
+  const cardId = vibeModalState.mode === 'create' ? payload.id : vibeModalState.cardId
+  const mode = vibeModalState.mode
+  vibeCardSaveError = null
+  vibeCardSavingIds = new Set([...vibeCardSavingIds, cardId])
+  if (currentData) render(currentData)
+
+  let succeeded = false
+  try {
+    const res = await fetch(mode === 'create'
+      ? '/api/vibe-cards'
+      : `/api/vibe-cards/${encodeURIComponent(vibeModalState.cardId)}`,
+    {
+      method: mode === 'create' ? 'POST' : 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
+
+    succeeded = true
+    await fetchVibeCards()
+    await refreshBoardState(`vibe-${mode}`)
+  } catch (error) {
+    await fetchVibeCards()
+    setVibeModalError(error.message || 'Failed to save Vibe Card')
+    await refreshBoardState(`vibe-${mode}-error`)
+  } finally {
+    const nextSavingIds = new Set(vibeCardSavingIds)
+    nextSavingIds.delete(cardId)
+    vibeCardSavingIds = nextSavingIds
+    vibeModalState.saving = false
+    if (succeeded) {
+      closeVibeModal()
+    } else {
+      renderVibeModal()
+    }
+    if (currentData) render(currentData)
+  }
+}
+
+async function deleteVibeCard() {
+  if (vibeModalState.mode !== 'edit' || !vibeModalState.cardId) return
+
+  vibeModalState.deleting = true
+  vibeModalState.error = ''
+  renderVibeModal()
+  const cardId = vibeModalState.cardId
+  vibeCardSaveError = null
+  vibeCardSavingIds = new Set([...vibeCardSavingIds, cardId])
+  if (currentData) render(currentData)
+
+  let succeeded = false
+  try {
+    const res = await fetch(`/api/vibe-cards/${encodeURIComponent(cardId)}`, { method: 'DELETE' })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
+    succeeded = true
+    await fetchVibeCards()
+    await refreshBoardState('vibe-delete')
+  } catch (error) {
+    await fetchVibeCards()
+    setVibeModalError(error.message || 'Failed to delete Vibe Card')
+    await refreshBoardState('vibe-delete-error')
+  } finally {
+    const nextSavingIds = new Set(vibeCardSavingIds)
+    nextSavingIds.delete(cardId)
+    vibeCardSavingIds = nextSavingIds
+    vibeModalState.deleting = false
+    if (succeeded) {
+      closeVibeModal()
+    } else {
+      renderVibeModal()
+    }
+    if (currentData) render(currentData)
+  }
+}
+
+function renderVibeModal() {
+  const els = getVibeModalElements()
+  if (!els.overlay) return
+
+  const isEdit = vibeModalState.mode === 'edit'
+  const busy = vibeModalState.saving || vibeModalState.deleting
+  const values = vibeModalState.values
+  const instanceOptions = getInstanceOptions()
+  const activeInstance = instanceOptions.find(inst => inst.name === values.instanceName)
+  const isLocalInstance = !!activeInstance && !activeInstance.pod
+
+  els.overlay.classList.toggle('visible', vibeModalState.open)
+  if (!vibeModalState.open) return
+
+  els.title.textContent = isEdit ? 'Edit Vibe Card' : 'New Vibe Card'
+  els.subtitle.textContent = isEdit
+    ? 'Update the board card metadata without changing the persisted card id.'
+    : 'Create a board card with lane, session, label, and Jira metadata.'
+
+  const focused = document.activeElement
+  if (focused !== els.titleInput) els.titleInput.value = values.title
+  if (focused !== els.descriptionInput) els.descriptionInput.value = values.description
+  els.laneInput.innerHTML = VIBE_LANES.map(lane => `<option value="${escapeAttr(lane.id)}">${esc(lane.label)}</option>`).join('')
+  els.laneInput.value = values.lane
+  els.priorityInput.value = values.priority
+  els.colorInput.value = values.color
+  els.instanceInput.innerHTML = [`<option value="">No instance</option>`].concat(
+    instanceOptions.map(inst => `<option value="${escapeAttr(inst.name)}">${esc(inst.name)}</option>`)
+  ).join('')
+  els.instanceInput.value = values.instanceName
+  els.sessionInput.innerHTML = [`<option value="">${vibeModalState.sessionsLoading ? 'Loading sessions…' : 'No session'}</option>`].concat(
+    vibeModalState.sessionOptions.map(name => `<option value="${escapeAttr(name)}">${esc(name)}</option>`)
+  ).join('')
+  els.sessionInput.value = values.sessionName && vibeModalState.sessionOptions.includes(values.sessionName) ? values.sessionName : ''
+  els.sessionInput.disabled = !values.instanceName || vibeModalState.sessionsLoading || vibeModalState.sessionOptions.length === 0
+  els.sessionHint.textContent = vibeModalState.sessionsError
+    ? `Session load failed: ${vibeModalState.sessionsError}`
+    : (!values.instanceName
+      ? 'Choose an instance to load sessions.'
+      : (vibeModalState.sessionsLoading
+        ? 'Loading sessions…'
+        : (vibeModalState.sessionOptions.length
+          ? (isLocalInstance
+            ? 'Local instances default to shell and persist the selected label.'
+            : 'Persisted with the card metadata.')
+          : 'No tmux sessions found for this instance.')))
+  if (focused !== els.jiraInput) els.jiraInput.value = values.jiraUrl
+  if (focused !== els.labelsInput) els.labelsInput.value = values.labelsText
+  if (focused !== els.linkedQuickTaskIdInput) els.linkedQuickTaskIdInput.value = values.linkedQuickTaskId
+  // Show live match status for the linked quick task field
+  const qtHint = els.linkedQuickTaskIdInput?.closest('.field-group')?.querySelector('.field-hint')
+  if (qtHint) {
+    const linkedId = values.linkedQuickTaskId.trim()
+    if (!linkedId) {
+      qtHint.textContent = 'Enter the quick task number. Card merges with the task once it appears on the board.'
+      qtHint.style.color = ''
+    } else {
+      // Check if this ID is live in current board data
+      const instName = values.instanceName
+      const allQts = (currentData?.instances ?? []).flatMap(inst => (inst.quickTasks ?? []).map(qt => ({ ...qt, _instance: inst })))
+      const matched = allQts.find(qt => String(qt.id) === String(linkedId) && (!instName || qt._instance.name === instName))
+      if (matched) {
+        qtHint.textContent = `✓ Matched: "${matched.title || matched.slug}" on ${matched._instance.name}`
+        qtHint.style.color = '#86efac'
+      } else {
+        qtHint.textContent = `Waiting for quick task #${linkedId} to appear on the board.`
+        qtHint.style.color = 'var(--muted)'
+      }
+    }
+  }
+
+  // Comments section
+  if (isEdit) {
+    els.commentsCompose.style.display = 'block'
+    els.commentsHint.textContent = ''
+    els.commentInput.disabled = busy || vibeModalState.commentSaving
+    els.commentSubmit.disabled = busy || vibeModalState.commentSaving || !els.commentInput.value.trim()
+    // Rebuild comment list
+    const comments = vibeModalState.comments
+    if (comments.length === 0) {
+      els.commentsList.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:4px 0">No comments yet.</div>'
+    } else {
+      els.commentsList.innerHTML = comments.map(c => `
+        <div class="vibe-comment" data-comment-id="${escapeAttr(c.id)}">
+          <div class="vibe-comment-text">${esc(c.text)}</div>
+          <div class="vibe-comment-meta">${formatCommentTime(c.createdAt)}</div>
+          <button class="vibe-comment-delete" title="Delete comment" data-comment-id="${escapeAttr(c.id)}">✕</button>
+        </div>
+      `).join('')
+      els.commentsList.querySelectorAll('.vibe-comment-delete').forEach(btn => {
+        btn.addEventListener('click', e => {
+          e.stopPropagation()
+          deleteVibeComment(btn.dataset.commentId)
+        })
+      })
+    }
+  } else {
+    els.commentsCompose.style.display = 'none'
+    els.commentsList.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:4px 0">Save the card first to add comments.</div>'
+    els.commentsHint.textContent = ''
+  }
+
+  els.error.textContent = vibeModalState.error
+  els.error.classList.toggle('visible', !!vibeModalState.error)
+
+  els.titleInput.disabled = busy
+  els.descriptionInput.disabled = busy
+  els.laneInput.disabled = busy
+  els.priorityInput.disabled = busy
+  els.colorInput.disabled = busy
+  els.instanceInput.disabled = busy
+  els.jiraInput.disabled = busy
+  els.labelsInput.disabled = busy
+  els.linkedQuickTaskIdInput.disabled = busy
+  els.cancel.disabled = busy
+  els.submit.disabled = busy
+  els.submit.textContent = vibeModalState.saving ? (isEdit ? 'Saving…' : 'Creating…') : (isEdit ? 'Save changes' : 'Create card')
+  els.deleteBtn.style.visibility = isEdit ? 'visible' : 'hidden'
+  els.deleteBtn.disabled = busy || !isEdit
+  els.deleteBtn.textContent = vibeModalState.deleting ? 'Deleting…' : 'Delete'
+}
+
+function formatCommentTime(isoString) {
+  if (!isoString) return ''
+  try {
+    const d = new Date(isoString)
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
+      d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  } catch { return isoString }
+}
+
+async function submitVibeComment() {
+  const els = getVibeModalElements()
+  const text = els.commentInput.value.trim()
+  if (!text || !vibeModalState.cardId) return
+
+  vibeModalState.commentSaving = true
+  renderVibeModal()
+
+  try {
+    const res = await fetch(`/api/vibe-cards/${encodeURIComponent(vibeModalState.cardId)}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
+    vibeModalState.comments = data.card.comments ?? []
+    els.commentInput.value = ''
+  } catch (err) {
+    setVibeModalError(err.message || 'Failed to add comment')
+  } finally {
+    vibeModalState.commentSaving = false
+    renderVibeModal()
+  }
+}
+
+async function deleteVibeComment(commentId) {
+  if (!vibeModalState.cardId || !commentId) return
+
+  vibeModalState.commentSaving = true
+  renderVibeModal()
+
+  try {
+    const res = await fetch(
+      `/api/vibe-cards/${encodeURIComponent(vibeModalState.cardId)}/comments/${encodeURIComponent(commentId)}`,
+      { method: 'DELETE' }
+    )
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
+    vibeModalState.comments = vibeModalState.comments.filter(c => c.id !== commentId)
+  } catch (err) {
+    setVibeModalError(err.message || 'Failed to delete comment')
+  } finally {
+    vibeModalState.commentSaving = false
+    renderVibeModal()
+  }
+}
+
+function escapeAttr(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+}
+
+const LEGACY_LANE_MAP = { 'backlog': 'discussing', 'in-progress': 'executing', 'review': 'validating' }
+
+function getVibeLane(card) {
+  if (typeof card?.lane !== 'string') return 'discussing'
+  if (VIBE_LANE_PHASE.has(card.lane)) return card.lane
+  return LEGACY_LANE_MAP[card.lane] ?? 'discussing'
+}
+
+function getVibeCardsForPhase(phase) {
+  return vibeCards.filter(card => VIBE_LANE_PHASE.get(getVibeLane(card)) === phase)
+}
+
+function vibeLaneLabel(laneId) {
+  return VIBE_LANES.find(lane => lane.id === laneId)?.label ?? laneId
+}
+
+function vibeLaneColor(laneId) {
+  switch (laneId) {
+    case 'discussing':  return 'var(--vibe-discussing)'
+    case 'researching': return 'var(--vibe-researching)'
+    case 'planning':    return 'var(--vibe-planning)'
+    case 'executing':   return 'var(--vibe-executing)'
+    case 'validating':  return 'var(--vibe-validating)'
+    case 'done':        return 'var(--vibe-done)'
+    default:            return 'var(--vibe-discussing)'
+  }
+}
+
+async function fetchVibeCards() {
+  vibeCardsLoading = true
+  vibeCardsError = null
+  try {
+    const res = await fetch('/api/vibe-cards')
+    const json = await res.json()
+    if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`)
+    const nextCards = Array.isArray(json?.cards) ? json.cards : []
+    if (vibeCardDragId && vibeCardDragSnapshot) {
+      const draggedCard = nextCards.find(card => card.id === vibeCardDragId)
+      if (draggedCard) {
+        vibeCards = nextCards.map(card => card.id === vibeCardDragId ? { ...draggedCard, lane: vibeCardDragSnapshot.lane } : card)
+      } else {
+        vibeCards = nextCards
+      }
+    } else {
+      vibeCards = nextCards
+    }
+    vibeCardSaveError = null
+
+    // Auto-move Vibe Cards to 'done' when their linked quick task completes.
+    if (currentData) {
+      const allQts = (currentData.instances ?? []).flatMap(inst =>
+        (inst.quickTasks ?? []).map(qt => ({ ...qt, _instName: inst.name }))
+      )
+      for (const vc of vibeCards) {
+        const meta = vibeCardMetadata(vc)
+        const linkedId = meta.linkedQuickTaskId
+        if (linkedId == null) continue
+        if (getVibeLane(vc) === 'done') continue  // already there
+        const matched = allQts.find(qt =>
+          String(qt.id) === String(linkedId) &&
+          (meta.instanceName == null || qt._instName === meta.instanceName) &&
+          qt.done === true
+        )
+        if (matched) {
+          // Fire-and-forget PATCH — don't await so fetch loop isn't blocked
+          moveVibeCard(vc.id, 'done').catch(() => {})
+        }
+      }
+    }
+  } catch (error) {
+    vibeCardsError = error.message || 'Failed to load Vibe Cards'
+    console.error('[vibe-cards] fetch failed', error)
+  } finally {
+    vibeCardsLoading = false
+    renderVibeModal()
+  }
+}
+
+async function moveVibeCard(cardId, lane) {
+  const existing = vibeCards.find(card => card.id === cardId)
+  if (!existing) return
+
+  const previousLane = getVibeLane(existing)
+  if (previousLane === lane) return
+
+  vibeCardSaveError = null
+  vibeCardSavingIds = new Set([...vibeCardSavingIds, cardId])
+  vibeCards = vibeCards.map(card => card.id === cardId ? { ...card, lane } : card)
+  if (currentData) render(currentData)
+
+  try {
+    const res = await fetch(`/api/vibe-cards/${encodeURIComponent(cardId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lane })
+    })
+    const json = await res.json()
+    if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`)
+    vibeCards = vibeCards.map(card => card.id === cardId ? json.card : card)
+  } catch (error) {
+    console.error(`[vibe-cards] save failed id=${cardId} lane=${lane}`, error)
+    vibeCardSaveError = `Failed to move Vibe Card: ${error.message || 'unknown error'}`
+    await fetchVibeCards()
+  } finally {
+    const nextSavingIds = new Set(vibeCardSavingIds)
+    nextSavingIds.delete(cardId)
+    vibeCardSavingIds = nextSavingIds
+    vibeCardDragSnapshot = vibeCardDragSnapshot?.id === cardId ? null : vibeCardDragSnapshot
+    vibeCardDragLane = null
+    if (currentData) render(currentData)
+  }
+}
+
 // ── Fetch + render loop ──────────────────────────────────────────────────────
 
 async function poll() {
   try {
-    const res  = await fetch(API)
-    const json = await res.json()
+    const [instancesRes] = await Promise.all([
+      fetch(API),
+      fetchVibeCards()
+    ])
+    const json = await instancesRes.json()
     currentData = json
     render(json)
     document.getElementById('status-dot').className = 'status-dot'
@@ -1671,7 +2988,16 @@ async function poll() {
   } catch(e) {
     document.getElementById('status-dot').className = 'status-dot stale'
     document.getElementById('last-updated').textContent = 'Offline'
+    console.error('[board] poll failed', e)
   }
+}
+
+function triggerBoardRefresh(reason) {
+  if (vibeCardDragId) {
+    console.debug(`[board] refresh deferred during drag reason=${reason} id=${vibeCardDragId}`)
+    return
+  }
+  poll()
 }
 
 // Fallback polling — keeps working if SSE/Redis is down
@@ -1695,10 +3021,10 @@ poll()
       }
       // Trigger immediate repoll on meaningful events
       if (event.eventType && event.eventType !== 'poll-tick') {
-        poll()
+        triggerBoardRefresh(`event:${event.eventType}`)
       }
       if (event.type === 'poll-tick') {
-        poll()
+        triggerBoardRefresh('poll-tick')
       }
     } catch {}
   }
@@ -1728,6 +3054,8 @@ function switchTab(tab) {
 function render(data) {
   const allMilestones = []
   const allQuickTasks = []
+
+  updateHideToggleButton()
 
   // Seed color map in stable order so colors don't shift on re-render
   for (const inst of data.instances) {
@@ -1776,23 +3104,63 @@ function renderBoard(milestones, instances, quickTasks) {
   const board = document.getElementById('board-view')
   board.innerHTML = ''
 
+  // Build a lookup: instanceName → Map(quickTaskId → quickTask)
+  // Used for Vibe Card ↔ quick task merge detection.
+  const quickTaskByInstAndId = new Map()
+  for (const qt of quickTasks) {
+    const instName = qt._instance?.name ?? ''
+    if (!quickTaskByInstAndId.has(instName)) quickTaskByInstAndId.set(instName, new Map())
+    quickTaskByInstAndId.get(instName).set(String(qt.id), qt)
+  }
+
+  // Set of "instName::qtId" keys claimed by a Vibe Card — these quick chips are suppressed.
+  const claimedQuickTaskKeys = new Set()
+  for (const vc of vibeCards) {
+    const linkedId = vibeCardMetadata(vc).linkedQuickTaskId
+    if (linkedId == null) continue
+    const instName = vibeCardMetadata(vc).instanceName ?? ''
+    claimedQuickTaskKeys.add(`${instName}::${String(linkedId)}`)
+  }
+
   for (const phase of PHASES) {
     let cards = milestones.filter(m => m.phase === phase)
+    const vibePhaseCards = getVibeCardsForPhase(phase)
 
     // Apply Done window filter
     if (phase === 'Done') {
       cards = cards.filter(m => isWithinDoneWindow(m.completed_at))
     }
 
-    // Quick tasks only go in Done
+    // Quick tasks only go in Done — exclude any claimed by a Vibe Card
     const phaseQuickTasks = phase === 'Done'
-      ? quickTasks.filter(qt => isWithinDoneWindow(qt.date))
+      ? quickTasks.filter(qt => {
+          if (qt.done === false) return false   // in-progress tasks render in Executing
+          if (!isWithinDoneWindow(qt.date)) return false
+          const instName = qt._instance?.name ?? ''
+          // Only suppress done tasks from Done if the Vibe Card itself is also in the Done lane.
+          // If the Vibe Card is in another lane, let the done quick chip appear in Done normally.
+          if (claimedQuickTaskKeys.has(`${instName}::${String(qt.id)}`)) {
+            const vc = vibeCards.find(c => {
+              const meta = vibeCardMetadata(c)
+              return String(meta.linkedQuickTaskId) === String(qt.id) &&
+                (meta.instanceName ?? '') === instName
+            })
+            return !vc || getVibeLane(vc) !== 'done'
+          }
+          return true
+        })
+      : phase === 'Executing'
+      ? quickTasks.filter(qt => {
+          if (qt.done !== false) return false   // only in-progress (no summary yet)
+          const instName = qt._instance?.name ?? ''
+          return !claimedQuickTaskKeys.has(`${instName}::${String(qt.id)}`)
+        })
       : []
-
-    const totalCount = cards.length + phaseQuickTasks.length
+    const totalCount = cards.length + phaseQuickTasks.length + vibePhaseCards.length
 
     const col = document.createElement('div')
     col.className = 'phase-column'
+    col.dataset.phase = phase
     col.innerHTML = `
       <div class="col-header">
         <span class="col-title">${phase}</span>
@@ -1804,6 +3172,51 @@ function renderBoard(milestones, instances, quickTasks) {
 
     const colEl = col.querySelector('.col-cards')
 
+    if (vibeCardsError) {
+      const banner = document.createElement('div')
+      banner.className = 'vibe-error-banner'
+      banner.dataset.vibeError = 'true'
+      banner.textContent = `Vibe Cards unavailable: ${vibeCardsError}`
+      colEl.appendChild(banner)
+    } else if (phase === 'Discussing' && vibeCardsLoading && vibeCards.length === 0) {
+      const banner = document.createElement('div')
+      banner.className = 'offline-card'
+      banner.textContent = 'Loading Vibe Cards…'
+      colEl.appendChild(banner)
+    }
+
+    const targetLane = VIBE_LANES.find(l => l.phase === phase)?.id ?? null
+    if (targetLane) {
+      // Attach drop zone to col-cards (the content area), not the outer column,
+      // so drops work even on empty columns where the header is most of the hit area.
+      colEl.addEventListener('dragover', event => {
+        if (!vibeCardDragId) return
+        event.preventDefault()
+        if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+        col.classList.add('drop-target')
+      })
+      col.addEventListener('dragleave', event => {
+        if (!col.contains(event.relatedTarget)) {
+          col.classList.remove('drop-target')
+        }
+      })
+      colEl.addEventListener('drop', async event => {
+        if (!vibeCardDragId) return
+        event.preventDefault()
+        col.classList.remove('drop-target')
+        const draggedId = vibeCardDragId
+        const sourceLane = vibeCardDragLane
+        vibeCardDragId = null
+        vibeCardDragLane = null
+        if (sourceLane === targetLane) {
+          vibeCardDragSnapshot = null
+          if (currentData) render(currentData)
+          return
+        }
+        await moveVibeCard(draggedId, targetLane)
+      })
+    }
+
     // Offline instance banners
     for (const inst of instances) {
       if (phase === 'Executing' && inst.error) {
@@ -1814,19 +3227,34 @@ function renderBoard(milestones, instances, quickTasks) {
       }
     }
 
+    for (const vibeCard of vibePhaseCards) {
+      const meta = vibeCardMetadata(vibeCard)
+      const linkedId = meta.linkedQuickTaskId != null ? String(meta.linkedQuickTaskId) : null
+      const linkedQt = linkedId
+        ? (quickTaskByInstAndId.get(meta.instanceName ?? '')?.get(linkedId) ?? null)
+        : null
+      colEl.appendChild(makeVibeCard(vibeCard, linkedQt))
+    }
+
     for (const m of cards) {
+      const key = cardHideKey(m)
+      if (hiddenCards.has(key) && !showHiddenCards) continue
       colEl.appendChild(makeCard(m))
     }
 
     // Quick task chips at bottom of Done
-    if (phaseQuickTasks.length > 0) {
+    const visibleQuickTasks = phaseQuickTasks.filter(qt => {
+      const key = `qt::${qt.slug || qt.title}::${qt._instance?.name ?? ''}`
+      return !hiddenCards.has(key) || showHiddenCards
+    })
+    if (visibleQuickTasks.length > 0) {
       const divider = document.createElement('div')
       divider.className = 'quick-divider'
-      divider.textContent = `⚡ Quick Tasks (${phaseQuickTasks.length})`
+      divider.textContent = `⚡ Quick Tasks (${visibleQuickTasks.length})`
       colEl.appendChild(divider)
 
       // Sort by date descending
-      const sorted = [...phaseQuickTasks].sort((a, b) =>
+      const sorted = [...visibleQuickTasks].sort((a, b) =>
         (b.date || '').localeCompare(a.date || '')
       )
       for (const qt of sorted) {
@@ -1834,6 +3262,74 @@ function renderBoard(milestones, instances, quickTasks) {
       }
     }
   }
+}
+
+function makeVibeCard(cardData, linkedQt = null) {
+  const lane = getVibeLane(cardData)
+  const laneLabel = vibeLaneLabel(lane)
+  const priority = cardData.priority || 'none'
+  const isSaving = vibeCardSavingIds.has(cardData.id)
+  const isMerged = !!linkedQt
+
+  const card = document.createElement('div')
+  card.className = `vibe-card${vibeCardDragId === cardData.id ? ' dragging' : ''}${isSaving ? ' saving' : ''}${isMerged ? ' vibe-merged' : ''}`
+  card.draggable = true
+  card.dataset.vibeCard = 'true'
+  card.dataset.vibeCardId = cardData.id
+  card.dataset.vibeLane = lane
+  card.style.setProperty('--vibe-lane-color', vibeLaneColor(lane))
+
+  const displayTitle = cardData.title || linkedQt?.title || '(untitled)'
+  const mergedMeta = isMerged ? `
+    <span class="vibe-chip vibe-chip-linked" title="Linked to quick task #${esc(String(linkedQt.id))}">
+      ⚡ #${esc(String(linkedQt.id))}${linkedQt.branch ? ` · ${esc(linkedQt.branch)}` : ''}
+    </span>` : ''
+
+  card.innerHTML = `
+    <div class="vibe-card-top">
+      <span class="vibe-badge">${isMerged ? 'Vibe + Task' : 'Vibe Card'}</span>
+      <div class="vibe-title-wrap">
+        <span class="vibe-card-title">${esc(displayTitle)}</span>
+        <span class="card-id">${esc(cardData.id)}</span>
+      </div>
+    </div>
+    ${cardData.description ? `<div class="vibe-card-description">${esc(cardData.description)}</div>` : ''}
+    <div class="vibe-card-meta">
+      <span class="vibe-chip lane" data-vibe-lane-chip="true">${esc(laneLabel)}</span>
+      ${priority && priority !== 'none' ? `<span class="vibe-chip priority-${escapeAttr(priority)}">${esc(priority)}</span>` : ''}
+      ${mergedMeta}
+      ${(cardData.tags || []).slice(0, 2).map(tag => `<span class="vibe-chip">#${esc(tag)}</span>`).join('')}
+      ${isSaving ? `<span class="vibe-chip">Saving…</span>` : ''}
+    </div>
+  `
+
+  card.addEventListener('click', event => {
+    if (vibeCardDragId) return
+    if (event.defaultPrevented) return
+    openEditVibeModal(cardData)
+  })
+
+  card.addEventListener('dragstart', event => {
+    vibeCardDragId = cardData.id
+    vibeCardDragLane = lane
+    vibeCardDragSnapshot = { id: cardData.id, lane }
+    event.dataTransfer?.setData('text/plain', cardData.id)
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+    event.dataTransfer.effectAllowed = 'move'
+    requestAnimationFrame(() => {
+      card.classList.add('dragging')
+    })
+  })
+
+  card.addEventListener('dragend', () => {
+    vibeCardDragId = null
+    vibeCardDragLane = null
+    vibeCardDragSnapshot = null
+    document.querySelectorAll('.phase-column.drop-target').forEach(el => el.classList.remove('drop-target'))
+    card.classList.remove('dragging')
+  })
+
+  return card
 }
 
 function makeCard(m) {
@@ -1844,19 +3340,22 @@ function makeCard(m) {
   const pct    = total ? Math.round((done / total) * 100) : 0
   const isDone = m.phase === 'Done'
   const icolor = getInstanceColor(inst.name)
+  const key    = cardHideKey(m)
+  const isHidden = hiddenCards.has(key)
 
   const card = document.createElement('div')
-  card.className = 'card' + (isDone ? ' done' : '')
+  card.className = 'card' + (isDone ? ' done' : '') + (isHidden ? ' card-hidden' : '')
   card.dataset.attention = m.attention || 'Healthy'
 
-  // Use instance color on left bar when Healthy; attention colors override via CSS
-  // for non-Healthy states. We set it inline only for Healthy so CSS data-attention
-  // selectors still win.
   if (!m.attention || m.attention === 'Healthy') {
     card.style.setProperty('--card-bar-color', icolor.color)
   }
 
+  const hideLabel = isHidden ? '👁' : '✕'
+  const hideTitle = isHidden ? 'Unhide card' : 'Hide card'
+
   card.innerHTML = `
+    <button class="card-hide-btn" title="${hideTitle}" data-hide-key="${escapeAttr(key)}">${hideLabel}</button>
     <div class="card-top">
       <span class="card-id">${m.id}</span>
       <span class="card-title">${esc(m.title || '(untitled)')}</span>
@@ -1879,18 +3378,24 @@ function makeCard(m) {
     ` : ''}
   `
 
+  card.querySelector('.card-hide-btn').addEventListener('click', e => toggleHideCard(key, e))
   card.addEventListener('click', () => openPanel(m))
   return card
 }
 
 function makeQuickChip(qt) {
-  const icolor = getInstanceColor(qt._instance.name)
+  const icolor  = getInstanceColor(qt._instance.name)
+  const key     = `qt::${qt.slug || qt.title}::${qt._instance?.name ?? ''}`
+  const isHidden = hiddenCards.has(key)
+  const inProgress = !qt.done
   const chip = document.createElement('div')
-  chip.className = 'quick-chip'
+  chip.className = 'quick-chip' + (isHidden ? ' card-hidden' : '') + (inProgress ? ' quick-chip-wip' : '')
+  chip.style.position = 'relative'
   chip.innerHTML = `
-    <span class="quick-chip-icon">⚡</span>
+    <button class="card-hide-btn" title="${isHidden ? 'Unhide' : 'Hide'}" data-hide-key="${escapeAttr(key)}">${isHidden ? '👁' : '✕'}</button>
+    <span class="quick-chip-icon">${inProgress ? '🔧' : '⚡'}</span>
     <div class="quick-chip-body">
-      <div class="quick-chip-title">${esc(qt.title || qt.slug || '(quick task)')}</div>
+      <div class="quick-chip-title">${esc(qt.title || qt.slug || '(quick task)')}${inProgress ? ' <span class="quick-wip-badge">in progress</span>' : ''}</div>
       <div class="quick-chip-meta">
         <span class="instance-chip" style="color:${icolor.color};background:${icolor.bg}">
           <span class="instance-dot" style="background:${icolor.color}"></span>
@@ -1901,6 +3406,7 @@ function makeQuickChip(qt) {
       </div>
     </div>
   `
+  chip.querySelector('.card-hide-btn').addEventListener('click', e => toggleHideCard(key, e))
   chip.addEventListener('click', () => openQuickPanel(qt))
   return chip
 }
