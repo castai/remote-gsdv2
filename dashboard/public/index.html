@@ -2905,6 +2905,28 @@ async function fetchVibeCards() {
       vibeCards = nextCards
     }
     vibeCardSaveError = null
+
+    // Auto-move Vibe Cards to 'done' when their linked quick task completes.
+    if (currentData) {
+      const allQts = (currentData.instances ?? []).flatMap(inst =>
+        (inst.quickTasks ?? []).map(qt => ({ ...qt, _instName: inst.name }))
+      )
+      for (const vc of vibeCards) {
+        const meta = vibeCardMetadata(vc)
+        const linkedId = meta.linkedQuickTaskId
+        if (linkedId == null) continue
+        if (getVibeLane(vc) === 'done') continue  // already there
+        const matched = allQts.find(qt =>
+          String(qt.id) === String(linkedId) &&
+          (meta.instanceName == null || qt._instName === meta.instanceName) &&
+          qt.done === true
+        )
+        if (matched) {
+          // Fire-and-forget PATCH — don't await so fetch loop isn't blocked
+          moveVibeCard(vc.id, 'done').catch(() => {})
+        }
+      }
+    }
   } catch (error) {
     vibeCardsError = error.message || 'Failed to load Vibe Cards'
     console.error('[vibe-cards] fetch failed', error)
@@ -3115,7 +3137,17 @@ function renderBoard(milestones, instances, quickTasks) {
           if (qt.done === false) return false   // in-progress tasks render in Executing
           if (!isWithinDoneWindow(qt.date)) return false
           const instName = qt._instance?.name ?? ''
-          return !claimedQuickTaskKeys.has(`${instName}::${String(qt.id)}`)
+          // Only suppress done tasks from Done if the Vibe Card itself is also in the Done lane.
+          // If the Vibe Card is in another lane, let the done quick chip appear in Done normally.
+          if (claimedQuickTaskKeys.has(`${instName}::${String(qt.id)}`)) {
+            const vc = vibeCards.find(c => {
+              const meta = vibeCardMetadata(c)
+              return String(meta.linkedQuickTaskId) === String(qt.id) &&
+                (meta.instanceName ?? '') === instName
+            })
+            return !vc || getVibeLane(vc) !== 'done'
+          }
+          return true
         })
       : phase === 'Executing'
       ? quickTasks.filter(qt => {
