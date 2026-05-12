@@ -26,6 +26,25 @@
       ],
       "createdAt": "2026-05-12T18:24:33.207Z",
       "updatedAt": "2026-05-12T19:28:30.448Z"
+    },
+    {
+      "id": "celery-cron-fixes-to-complete-migration",
+      "title": "Celery / Cron Fixes to Complete migration",
+      "description": null,
+      "status": "open",
+      "lane": "executing",
+      "priority": "medium",
+      "tags": [],
+      "metadata": {
+        "color": "purple",
+        "instanceName": "salesanalyzer",
+        "sessionName": "M027AutoMode",
+        "jiraUrl": null,
+        "linkedQuickTaskId": 55
+      },
+      "comments": [],
+      "createdAt": "2026-05-12T19:45:31.788Z",
+      "updatedAt": "2026-05-12T20:00:53.465Z"
     }
   ]
 }

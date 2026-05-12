@@ -1360,6 +1360,14 @@
       text-overflow: ellipsis;
     }
 
+    .quick-chip-id {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 10px;
+      color: var(--muted);
+      font-weight: 400;
+      flex-shrink: 0;
+    }
+
     .quick-chip-meta {
       font-size: 10px;
       color: var(--muted);
@@ -2918,7 +2926,6 @@ async function fetchVibeCards() {
         if (getVibeLane(vc) === 'done') continue  // already there
         const matched = allQts.find(qt =>
           String(qt.id) === String(linkedId) &&
-          (meta.instanceName == null || qt._instName === meta.instanceName) &&
           qt.done === true
         )
         if (matched) {
@@ -3115,11 +3122,16 @@ function renderBoard(milestones, instances, quickTasks) {
 
   // Set of "instName::qtId" keys claimed by a Vibe Card — these quick chips are suppressed.
   const claimedQuickTaskKeys = new Set()
+  // Map from qtId string → Vibe Card (for merge lookup independent of instance)
+  const claimedQtIdToVibeCard = new Map()
   for (const vc of vibeCards) {
     const linkedId = vibeCardMetadata(vc).linkedQuickTaskId
     if (linkedId == null) continue
     const instName = vibeCardMetadata(vc).instanceName ?? ''
-    claimedQuickTaskKeys.add(`${instName}::${String(linkedId)}`)
+    const idStr = String(linkedId)
+    claimedQuickTaskKeys.add(`${instName}::${idStr}`)
+    claimedQuickTaskKeys.add(`::${idStr}`)  // instance-agnostic fallback
+    claimedQtIdToVibeCard.set(idStr, vc)
   }
 
   for (const phase of PHASES) {
@@ -3136,15 +3148,9 @@ function renderBoard(milestones, instances, quickTasks) {
       ? quickTasks.filter(qt => {
           if (qt.done === false) return false   // in-progress tasks render in Executing
           if (!isWithinDoneWindow(qt.date)) return false
-          const instName = qt._instance?.name ?? ''
-          // Only suppress done tasks from Done if the Vibe Card itself is also in the Done lane.
-          // If the Vibe Card is in another lane, let the done quick chip appear in Done normally.
-          if (claimedQuickTaskKeys.has(`${instName}::${String(qt.id)}`)) {
-            const vc = vibeCards.find(c => {
-              const meta = vibeCardMetadata(c)
-              return String(meta.linkedQuickTaskId) === String(qt.id) &&
-                (meta.instanceName ?? '') === instName
-            })
+          const idStr = String(qt.id)
+          if (claimedQuickTaskKeys.has(`::${idStr}`)) {
+            const vc = claimedQtIdToVibeCard.get(idStr)
             return !vc || getVibeLane(vc) !== 'done'
           }
           return true
@@ -3152,8 +3158,7 @@ function renderBoard(milestones, instances, quickTasks) {
       : phase === 'Executing'
       ? quickTasks.filter(qt => {
           if (qt.done !== false) return false   // only in-progress (no summary yet)
-          const instName = qt._instance?.name ?? ''
-          return !claimedQuickTaskKeys.has(`${instName}::${String(qt.id)}`)
+          return !claimedQuickTaskKeys.has(`::${String(qt.id)}`)
         })
       : []
     const totalCount = cards.length + phaseQuickTasks.length + vibePhaseCards.length
@@ -3231,7 +3236,8 @@ function renderBoard(milestones, instances, quickTasks) {
       const meta = vibeCardMetadata(vibeCard)
       const linkedId = meta.linkedQuickTaskId != null ? String(meta.linkedQuickTaskId) : null
       const linkedQt = linkedId
-        ? (quickTaskByInstAndId.get(meta.instanceName ?? '')?.get(linkedId) ?? null)
+        ? (quickTaskByInstAndId.get(meta.instanceName ?? '')?.get(linkedId)
+            ?? [...quickTaskByInstAndId.values()].reduce((found, m) => found ?? m.get(linkedId) ?? null, null))
         : null
       colEl.appendChild(makeVibeCard(vibeCard, linkedQt))
     }
@@ -3395,7 +3401,7 @@ function makeQuickChip(qt) {
     <button class="card-hide-btn" title="${isHidden ? 'Unhide' : 'Hide'}" data-hide-key="${escapeAttr(key)}">${isHidden ? '👁' : '✕'}</button>
     <span class="quick-chip-icon">${inProgress ? '🔧' : '⚡'}</span>
     <div class="quick-chip-body">
-      <div class="quick-chip-title">${esc(qt.title || qt.slug || '(quick task)')}${inProgress ? ' <span class="quick-wip-badge">in progress</span>' : ''}</div>
+      <div class="quick-chip-title"><span class="quick-chip-id">#${esc(String(qt.id))}</span> ${esc(qt.title || qt.slug || '(quick task)')}${inProgress ? ' <span class="quick-wip-badge">in progress</span>' : ''}</div>
       <div class="quick-chip-meta">
         <span class="instance-chip" style="color:${icolor.color};background:${icolor.bg}">
           <span class="instance-dot" style="background:${icolor.color}"></span>
