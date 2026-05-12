@@ -4,8 +4,8 @@
       "id": "render-backlog-card",
       "title": "Backlog Vibe",
       "description": "Should appear in Discussing",
-      "status": "open",
       "lane": "backlog",
+      "status": "open",
       "priority": "medium",
       "tags": [
         "board",
@@ -21,8 +21,8 @@
       "id": "render-review-card",
       "title": "Review Vibe",
       "description": "Should appear in Validating",
-      "status": "open",
       "lane": "review",
+      "status": "open",
       "priority": "high",
       "tags": [
         "board",
@@ -33,23 +33,6 @@
       },
       "createdAt": "2026-01-01T00:00:00.000Z",
       "updatedAt": "2026-01-01T00:00:00.000Z"
-    },
-    {
-      "id": "modal-bootstrap-card",
-      "title": "Modal Bootstrap Card",
-      "description": "Ensures the board renders a Vibe card before modal checks",
-      "status": "open",
-      "lane": "backlog",
-      "priority": "medium",
-      "tags": [
-        "modal",
-        "bootstrap"
-      ],
-      "metadata": {
-        "source": "board-verify"
-      },
-      "createdAt": "2026-05-12T17:01:52.753Z",
-      "updatedAt": "2026-05-12T17:01:52.753Z"
     }
   ]
 }
