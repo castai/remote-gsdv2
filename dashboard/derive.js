@@ -129,10 +129,15 @@ function deriveAttention(milestone, { pausedSession, stuckState, recentNotificat
     const errBelongsHere = lastError && lastError.unitId &&
       (lastError.unitId === mid || lastError.unitId.startsWith(mid + '/'))
     if (errBelongsHere) {
-      const transient = lastError.isTransient ? ' (transient)' : ''
+      // Transient errors (429, rate limits, session failures) self-recover —
+      // show Healthy so the board doesn't alarm on expected retry behaviour.
+      // Only surface as Blocked/Errored if the error is non-transient.
+      if (lastError.isTransient) {
+        return { attention: 'Healthy', attentionDetail: null }
+      }
       return {
-        attention:       lastError.isTransient ? 'Blocked' : 'Errored',
-        attentionDetail: `${lastError.unitId} ${lastError.status ?? 'cancelled'}${transient}: ${lastError.message}`
+        attention:       'Errored',
+        attentionDetail: `${lastError.unitId} ${lastError.status ?? 'cancelled'}: ${lastError.message}`
       }
     }
 
@@ -166,8 +171,10 @@ function deriveAttention(milestone, { pausedSession, stuckState, recentNotificat
   // ── Not paused ──────────────────────────────────────────────────────────────
   if (lastError && lastError.unitId &&
       (lastError.unitId === mid || lastError.unitId.startsWith(mid + '/'))) {
+    // Transient — self-recovers, don't alarm
+    if (lastError.isTransient) return { attention: 'Healthy', attentionDetail: null }
     return {
-      attention:       lastError.isTransient ? 'Blocked' : 'Errored',
+      attention:       'Errored',
       attentionDetail: `${lastError.unitId} ${lastError.status ?? 'cancelled'}: ${lastError.message}`
     }
   }
