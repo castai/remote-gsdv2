@@ -1445,6 +1445,8 @@ let vibeCardsError = null
 let vibeCardsLoading = false
 let vibeCardSaveError = null
 let vibeCardDragId = null
+let vibeCardDragLane = null
+let vibeCardDragSnapshot = null
 let vibeCardSavingIds = new Set()
 let selectedCard = null
 let currentTab   = 'board'
@@ -1843,7 +1845,17 @@ async function fetchVibeCards() {
     const res = await fetch('/api/vibe-cards')
     const json = await res.json()
     if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`)
-    vibeCards = Array.isArray(json?.cards) ? json.cards : []
+    const nextCards = Array.isArray(json?.cards) ? json.cards : []
+    if (vibeCardDragId && vibeCardDragSnapshot) {
+      const draggedCard = nextCards.find(card => card.id === vibeCardDragId)
+      if (draggedCard) {
+        vibeCards = nextCards.map(card => card.id === vibeCardDragId ? { ...draggedCard, lane: vibeCardDragSnapshot.lane } : card)
+      } else {
+        vibeCards = nextCards
+      }
+    } else {
+      vibeCards = nextCards
+    }
     vibeCardSaveError = null
   } catch (error) {
     vibeCardsError = error.message || 'Failed to load Vibe Cards'
@@ -1882,6 +1894,8 @@ async function moveVibeCard(cardId, lane) {
     const nextSavingIds = new Set(vibeCardSavingIds)
     nextSavingIds.delete(cardId)
     vibeCardSavingIds = nextSavingIds
+    vibeCardDragSnapshot = vibeCardDragSnapshot?.id === cardId ? null : vibeCardDragSnapshot
+    vibeCardDragLane = null
     if (currentData) render(currentData)
   }
 }
@@ -1907,6 +1921,14 @@ async function poll() {
   }
 }
 
+function triggerBoardRefresh(reason) {
+  if (vibeCardDragId) {
+    console.debug(`[board] refresh deferred during drag reason=${reason} id=${vibeCardDragId}`)
+    return
+  }
+  poll()
+}
+
 // Fallback polling — keeps working if SSE/Redis is down
 setInterval(poll, POLL)
 poll()
@@ -1928,10 +1950,10 @@ poll()
       }
       // Trigger immediate repoll on meaningful events
       if (event.eventType && event.eventType !== 'poll-tick') {
-        poll()
+        triggerBoardRefresh(`event:${event.eventType}`)
       }
       if (event.type === 'poll-tick') {
-        poll()
+        triggerBoardRefresh('poll-tick')
       }
     } catch {}
   }
@@ -2057,6 +2079,7 @@ function renderBoard(milestones, instances, quickTasks) {
       col.addEventListener('dragover', event => {
         if (!vibeCardDragId) return
         event.preventDefault()
+        if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
         col.classList.add('drop-target')
       })
       col.addEventListener('dragleave', event => {
@@ -2069,7 +2092,14 @@ function renderBoard(milestones, instances, quickTasks) {
         event.preventDefault()
         col.classList.remove('drop-target')
         const draggedId = vibeCardDragId
+        const sourceLane = vibeCardDragLane
         vibeCardDragId = null
+        vibeCardDragLane = null
+        if (sourceLane === targetLane) {
+          vibeCardDragSnapshot = null
+          if (currentData) render(currentData)
+          return
+        }
         await moveVibeCard(draggedId, targetLane)
       })
     }
@@ -2143,7 +2173,10 @@ function makeVibeCard(cardData) {
 
   card.addEventListener('dragstart', event => {
     vibeCardDragId = cardData.id
+    vibeCardDragLane = lane
+    vibeCardDragSnapshot = { id: cardData.id, lane }
     event.dataTransfer?.setData('text/plain', cardData.id)
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
     event.dataTransfer.effectAllowed = 'move'
     requestAnimationFrame(() => {
       card.classList.add('dragging')
@@ -2152,6 +2185,8 @@ function makeVibeCard(cardData) {
 
   card.addEventListener('dragend', () => {
     vibeCardDragId = null
+    vibeCardDragLane = null
+    vibeCardDragSnapshot = null
     document.querySelectorAll('.phase-column.drop-target').forEach(el => el.classList.remove('drop-target'))
     card.classList.remove('dragging')
   })

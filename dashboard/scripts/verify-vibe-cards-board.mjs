@@ -149,30 +149,15 @@ async function startManagedServer({ reseed = false, logDir = null } = {}) {
   }
 }
 
-async function verifyRender() {
-  const created = await request('/api/vibe-cards', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      id: 'render-done-card',
-      title: 'Done Vibe',
-      description: 'Will be dragged across lanes',
-      lane: 'done',
-      status: 'closed',
-      priority: 'low',
-      tags: ['board', 'done'],
-      metadata: { source: 'board-verify' }
-    })
-  })
-  assert.equal(created.res.status, 201, 'Verifier should be able to seed a third card through the API')
-
-  const browser = await chromium.launch({ headless: true })
-  const page = await browser.newPage()
+function createBrowserDiagnostics(page) {
   const consoleErrors = []
   const failedRequests = []
 
   page.on('console', msg => {
     if (msg.type() === 'error') consoleErrors.push(msg.text())
+    if (msg.type() === 'debug' && msg.text().includes('[board] refresh deferred during drag')) {
+      consoleErrors.push(`DEBUG:${msg.text()}`)
+    }
   })
   page.on('requestfailed', request => {
     const url = request.url()
@@ -190,62 +175,19 @@ async function verifyRender() {
     }
   })
 
-  try {
-    await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' })
-    await page.waitForResponse(response => response.url().endsWith('/api/vibe-cards') && response.request().method() === 'GET' && response.status() === 200)
-    await page.waitForSelector('[data-vibe-card="true"]')
+  return { consoleErrors, failedRequests }
+}
 
-    const backlogColumn = page.locator('#col-Discussing')
-    const executingColumn = page.locator('#col-Executing')
-    const validatingColumn = page.locator('#col-Validating')
-    const doneColumn = page.locator('#col-Done')
+function assertNoUnexpectedDiagnostics({ consoleErrors, failedRequests }) {
+  const unexpectedConsoleErrors = consoleErrors.filter(entry => !entry.startsWith('DEBUG:'))
+  assert.equal(unexpectedConsoleErrors.length, 0, `Board should not emit console errors: ${unexpectedConsoleErrors.join('\n')}`)
+  assert.equal(failedRequests.length, 0, `Board should not emit failed network requests: ${failedRequests.join('\n')}`)
+}
 
-    await assertTextVisible(backlogColumn, 'Backlog Vibe')
-    await assertTextVisible(validatingColumn, 'Review Vibe')
-    await assertTextVisible(doneColumn, 'Done Vibe')
-
-    const vibeCard = page.locator('[data-vibe-card-id="render-backlog-card"]').first()
-    const milestoneCard = page.locator('.card').first()
-
-    await assert.ok(await vibeCard.count(), 'Vibe card should render with dedicated selector')
-    await assert.ok(await milestoneCard.count(), 'Existing milestone cards should still render')
-
-    const vibeClass = await vibeCard.getAttribute('class')
-    const milestoneClass = await milestoneCard.getAttribute('class')
-    assert.match(vibeClass ?? '', /vibe-card/, 'Vibe cards should use dedicated styling class')
-    assert.doesNotMatch(milestoneClass ?? '', /vibe-card/, 'Milestone cards should not be converted to vibe cards')
-
-    const backlogLaneLabel = await vibeCard.locator('[data-vibe-lane-chip="true"]').textContent()
-    assert.equal(backlogLaneLabel?.trim(), 'Backlog', 'Lane chip should reflect backlog lane')
-
-    await page.dragAndDrop('[data-vibe-card-id="render-backlog-card"]', '#col-Executing')
-    await page.waitForResponse(response => response.url().includes('/api/vibe-cards/render-backlog-card') && response.request().method() === 'PATCH' && response.status() === 200)
-    await page.waitForTimeout(250)
-    await page.reload({ waitUntil: 'domcontentloaded' })
-    await page.waitForResponse(response => response.url().endsWith('/api/vibe-cards') && response.request().method() === 'GET' && response.status() === 200)
-
-    await assertTextVisible(executingColumn, 'Backlog Vibe')
-    await assertTextHidden(backlogColumn, 'Backlog Vibe')
-
-    const afterReloadLaneLabel = await page.locator('[data-vibe-card-id="render-backlog-card"] [data-vibe-lane-chip="true"]').textContent()
-    assert.equal(afterReloadLaneLabel?.trim(), 'In Progress', 'Lane chip should update after drag + reload')
-
-    const persisted = await request('/api/vibe-cards')
-    assert.equal(persisted.res.status, 200, 'GET /api/vibe-cards should still succeed after drag')
-    const movedCard = persisted.json.cards.find(card => card.id === 'render-backlog-card')
-    assert.equal(movedCard?.lane, 'in-progress', 'Dragged lane should persist via API state')
-
-    const stdout = shouldManageServer ? readFileSync(serverHandle.stdoutPath, 'utf8') : ''
-    if (shouldManageServer) {
-      assert.match(stdout, /\[vibe-cards\] action=update id=render-backlog-card/, 'Server logs should show lane persistence update')
-    }
-
-    assert.equal(consoleErrors.length, 0, `Board should not emit console errors: ${consoleErrors.join('\n')}`)
-    assert.equal(failedRequests.length, 0, `Board should not emit failed network requests: ${failedRequests.join('\n')}`)
-  } finally {
-    await page.close()
-    await browser.close()
-  }
+async function openBoard(page) {
+  await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' })
+  await page.waitForResponse(response => response.url().endsWith('/api/vibe-cards') && response.request().method() === 'GET' && response.status() === 200)
+  await page.waitForSelector('[data-vibe-card="true"]')
 }
 
 async function assertTextVisible(locator, text) {
@@ -260,7 +202,147 @@ async function assertTextHidden(locator, text) {
   )
 }
 
-if (mode !== 'render') {
+async function verifyRender() {
+  const created = await request('/api/vibe-cards', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      id: 'render-done-card',
+      title: 'Done Vibe',
+      description: 'Should appear in Done',
+      lane: 'done',
+      status: 'closed',
+      priority: 'low',
+      tags: ['board', 'done'],
+      metadata: { source: 'board-verify' }
+    })
+  })
+  assert.equal(created.res.status, 201, 'Verifier should be able to seed a third card through the API')
+
+  const browser = await chromium.launch({ headless: true })
+  const page = await browser.newPage()
+  const diagnostics = createBrowserDiagnostics(page)
+
+  try {
+    await openBoard(page)
+
+    const backlogColumn = page.locator('#col-Discussing')
+    const executingColumn = page.locator('#col-Executing')
+    const validatingColumn = page.locator('#col-Validating')
+    const doneColumn = page.locator('#col-Done')
+
+    await assertTextVisible(backlogColumn, 'Backlog Vibe')
+    await assertTextVisible(validatingColumn, 'Review Vibe')
+    await assertTextVisible(doneColumn, 'Done Vibe')
+
+    const vibeCard = page.locator('[data-vibe-card-id="render-backlog-card"]').first()
+    const milestoneCard = page.locator('.card').first()
+
+    await assert.ok(await milestoneCard.count(), 'Existing milestone cards should still render')
+
+    const vibeClass = await vibeCard.getAttribute('class')
+    const milestoneClass = await milestoneCard.getAttribute('class')
+    assert.match(vibeClass ?? '', /vibe-card/, 'Vibe cards should use dedicated styling class')
+    assert.doesNotMatch(milestoneClass ?? '', /vibe-card/, 'Milestone cards should not be converted to vibe cards')
+
+    const backlogLaneLabel = await vibeCard.locator('[data-vibe-lane-chip="true"]').textContent()
+    assert.equal(backlogLaneLabel?.trim(), 'Backlog', 'Lane chip should reflect backlog lane')
+
+    await milestoneCard.click()
+    await page.locator('#panel-overlay.visible').waitFor({ state: 'visible' })
+    const panelTitle = await page.locator('#panel-title').textContent()
+    assert.ok(panelTitle?.includes('—'), 'Milestone card click should open a detail panel with a milestone title')
+    await page.click('.panel-close')
+
+    assertNoUnexpectedDiagnostics(diagnostics)
+  } finally {
+    await page.close()
+    await browser.close()
+  }
+}
+
+async function verifyDrag() {
+  const browser = await chromium.launch({ headless: true })
+  const page = await browser.newPage()
+  const diagnostics = createBrowserDiagnostics(page)
+  const patchRequests = []
+
+  page.on('request', request => {
+    if (request.method() === 'PATCH' && request.url().includes('/api/vibe-cards/render-backlog-card')) {
+      patchRequests.push(request)
+    }
+  })
+
+  try {
+    await openBoard(page)
+
+    const backlogColumn = page.locator('#col-Discussing')
+    const executingColumn = page.locator('#col-Executing')
+    const panelOverlay = page.locator('#panel-overlay')
+    const milestoneCard = page.locator('.card').first()
+
+    await assertTextVisible(backlogColumn, 'Backlog Vibe')
+    await assertTextHidden(executingColumn, 'Backlog Vibe')
+
+    const dragCard = page.locator('[data-vibe-card-id="render-backlog-card"]').first()
+    await dragCard.hover()
+    await page.dispatchEvent('[data-vibe-card-id="render-backlog-card"]', 'dragstart', {
+      dataTransfer: await page.evaluateHandle(() => new DataTransfer())
+    })
+    await page.waitForTimeout(50)
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.waitForResponse(response => response.url().endsWith('/api/vibe-cards') && response.request().method() === 'GET' && response.status() === 200)
+    await page.waitForSelector('[data-vibe-card-id="render-backlog-card"]')
+
+    const laneDuringDrag = await page.locator('[data-vibe-card-id="render-backlog-card"] [data-vibe-lane-chip="true"]').textContent()
+    assert.equal(laneDuringDrag?.trim(), 'Backlog', 'Refresh during drag should not move the card before drop')
+
+    await page.dragAndDrop('[data-vibe-card-id="render-backlog-card"]', '#col-Executing')
+    const patchResponse = await page.waitForResponse(response => response.url().includes('/api/vibe-cards/render-backlog-card') && response.request().method() === 'PATCH' && response.status() === 200)
+    const patchBody = patchRequests.at(-1)?.postDataJSON()
+    assert.deepEqual(patchBody, { lane: 'in-progress' }, 'Drag should PATCH the target lane contract')
+    const patchJson = await patchResponse.json()
+    assert.equal(patchJson.card?.lane, 'in-progress', 'PATCH response should reflect the new lane')
+
+    await page.waitForTimeout(250)
+    await page.waitForSelector('[data-vibe-card-id="render-backlog-card"][data-vibe-lane="in-progress"]')
+    await assertTextVisible(executingColumn, 'Backlog Vibe')
+    await assertTextHidden(backlogColumn, 'Backlog Vibe')
+
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.waitForResponse(response => response.url().endsWith('/api/vibe-cards') && response.request().method() === 'GET' && response.status() === 200)
+    await page.waitForSelector('[data-vibe-card-id="render-backlog-card"]')
+
+    await assertTextVisible(executingColumn, 'Backlog Vibe')
+    await assertTextHidden(backlogColumn, 'Backlog Vibe')
+    const afterReloadLaneLabel = await page.locator('[data-vibe-card-id="render-backlog-card"] [data-vibe-lane-chip="true"]').textContent()
+    assert.equal(afterReloadLaneLabel?.trim(), 'In Progress', 'Lane chip should update after drag + reload')
+
+    const persisted = await request('/api/vibe-cards')
+    assert.equal(persisted.res.status, 200, 'GET /api/vibe-cards should still succeed after drag')
+    const movedCard = persisted.json.cards.find(card => card.id === 'render-backlog-card')
+    assert.equal(movedCard?.lane, 'in-progress', 'Dragged lane should persist via API state')
+
+    await assert.ok(await milestoneCard.count(), 'Milestone cards should still render after drag wiring')
+    await milestoneCard.click()
+    await panelOverlay.waitFor({ state: 'visible' })
+    const panelTitle = await page.locator('#panel-title').textContent()
+    assert.ok(panelTitle?.includes('—'), 'Milestone card click should open a detail panel with a milestone title')
+    await page.click('.panel-close')
+
+    const stdout = shouldManageServer && serverHandle ? readFileSync(serverHandle.stdoutPath, 'utf8') : ''
+    if (shouldManageServer) {
+      assert.match(stdout, /\[vibe-cards\] action=update id=render-backlog-card/, 'Server logs should show lane persistence update')
+    }
+
+    assertNoUnexpectedDiagnostics(diagnostics)
+  } finally {
+    await page.close()
+    await browser.close()
+  }
+}
+
+if (!['render', 'drag'].includes(mode)) {
   throw new Error(`Unsupported mode '${mode}'`)
 }
 
@@ -269,7 +351,11 @@ const originalFixture = existsSync(FIXTURE_FILE) ? readFileSync(FIXTURE_FILE, 'u
 
 try {
   serverHandle = shouldManageServer ? await startManagedServer({ reseed: true }) : null
-  await verifyRender()
+  if (mode === 'render') {
+    await verifyRender()
+  } else {
+    await verifyDrag()
+  }
   console.log(`verify-vibe-cards-board: ${mode} ok (${BASE_URL})`)
 } finally {
   if (serverHandle) {
