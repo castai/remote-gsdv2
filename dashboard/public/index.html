@@ -1322,6 +1322,26 @@
 
     .quick-chip:hover { border-color: var(--accent); }
 
+    .quick-chip-wip {
+      border-color: rgba(251,191,36,0.35);
+      background: rgba(251,191,36,0.06);
+    }
+    .quick-chip-wip:hover { border-color: rgba(251,191,36,0.7); }
+
+    .quick-wip-badge {
+      display: inline-block;
+      font-size: 9px;
+      font-weight: 600;
+      color: #fbbf24;
+      background: rgba(251,191,36,0.15);
+      border-radius: 3px;
+      padding: 1px 5px;
+      margin-left: 5px;
+      vertical-align: middle;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
     .quick-chip-icon {
       font-size: 12px;
       flex-shrink: 0;
@@ -3092,12 +3112,18 @@ function renderBoard(milestones, instances, quickTasks) {
     // Quick tasks only go in Done — exclude any claimed by a Vibe Card
     const phaseQuickTasks = phase === 'Done'
       ? quickTasks.filter(qt => {
+          if (qt.done === false) return false   // in-progress tasks render in Executing
           if (!isWithinDoneWindow(qt.date)) return false
           const instName = qt._instance?.name ?? ''
           return !claimedQuickTaskKeys.has(`${instName}::${String(qt.id)}`)
         })
+      : phase === 'Executing'
+      ? quickTasks.filter(qt => {
+          if (qt.done !== false) return false   // only in-progress (no summary yet)
+          const instName = qt._instance?.name ?? ''
+          return !claimedQuickTaskKeys.has(`${instName}::${String(qt.id)}`)
+        })
       : []
-
     const totalCount = cards.length + phaseQuickTasks.length + vibePhaseCards.length
 
     const col = document.createElement('div')
@@ -3326,17 +3352,18 @@ function makeCard(m) {
 }
 
 function makeQuickChip(qt) {
-  const icolor = getInstanceColor(qt._instance.name)
-  const key    = `qt::${qt.slug || qt.title}::${qt._instance?.name ?? ''}`
+  const icolor  = getInstanceColor(qt._instance.name)
+  const key     = `qt::${qt.slug || qt.title}::${qt._instance?.name ?? ''}`
   const isHidden = hiddenCards.has(key)
+  const inProgress = !qt.done
   const chip = document.createElement('div')
-  chip.className = 'quick-chip' + (isHidden ? ' card-hidden' : '')
+  chip.className = 'quick-chip' + (isHidden ? ' card-hidden' : '') + (inProgress ? ' quick-chip-wip' : '')
   chip.style.position = 'relative'
   chip.innerHTML = `
     <button class="card-hide-btn" title="${isHidden ? 'Unhide' : 'Hide'}" data-hide-key="${escapeAttr(key)}">${isHidden ? '👁' : '✕'}</button>
-    <span class="quick-chip-icon">⚡</span>
+    <span class="quick-chip-icon">${inProgress ? '🔧' : '⚡'}</span>
     <div class="quick-chip-body">
-      <div class="quick-chip-title">${esc(qt.title || qt.slug || '(quick task)')}</div>
+      <div class="quick-chip-title">${esc(qt.title || qt.slug || '(quick task)')}${inProgress ? ' <span class="quick-wip-badge">in progress</span>' : ''}</div>
       <div class="quick-chip-meta">
         <span class="instance-chip" style="color:${icolor.color};background:${icolor.bg}">
           <span class="instance-dot" style="background:${icolor.color}"></span>

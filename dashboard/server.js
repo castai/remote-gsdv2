@@ -96,7 +96,7 @@ function normalizeCardTimestamps(card, nowIso) {
 function validateCardShape(card, { partial = false } = {}) {
   if (!isPlainObject(card)) return 'card must be an object'
 
-  const allowedKeys = new Set(['id', 'title', 'description', 'status', 'lane', 'priority', 'tags', 'metadata', 'createdAt', 'updatedAt'])
+  const allowedKeys = new Set(['id', 'title', 'description', 'status', 'lane', 'priority', 'tags', 'metadata', 'comments', 'createdAt', 'updatedAt'])
   for (const key of Object.keys(card)) {
     if (!allowedKeys.has(key)) return `unexpected field '${key}'`
   }
@@ -156,6 +156,7 @@ function validateVibeCardsPayload(payload) {
       priority: card.priority ?? null,
       tags: card.tags ?? [],
       metadata: card.metadata ?? {},
+      comments: Array.isArray(card.comments) ? card.comments : [],
       createdAt: card.createdAt,
       updatedAt: card.updatedAt
     })

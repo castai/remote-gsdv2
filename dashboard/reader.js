@@ -214,26 +214,35 @@ try:
             num  = int(m.group(1))
             slug = m.group(2)
             md_path = os.path.join(quick_dir, subdir, str(num) + '-SUMMARY.md')
-            if not os.path.exists(md_path): continue
-            try:
-                content = open(md_path).read()
-                title_m  = re.search(r'^#\\s+Quick Task:\\s*(.+)', content, re.MULTILINE)
-                title    = title_m.group(1).strip() if title_m else slug.replace('-', ' ')
-                date_m   = re.search(r'\\*\\*Date:\\*\\*\\s*(\\S+)', content)
-                date     = date_m.group(1) if date_m else None
-                branch_m = re.search(r'\\*\\*Branch:\\*\\*\\s*(\\S+)', content)
-                branch   = branch_m.group(1) if branch_m else None
-                wc_m     = re.search(r'## What Changed\\s*\\n+(.+?)(?:\\n\\n|\\n##|$)', content, re.DOTALL)
-                summary  = wc_m.group(1).strip()[:200] if wc_m else ''
-                quick_tasks.append({
-                    'id':      num,
-                    'title':   title,
-                    'date':    date,
-                    'branch':  branch,
-                    'summary': summary,
-                    'slug':    slug
-                })
-            except: pass
+            # Surface the task as soon as its directory exists, even before the summary is written.
+            # Fields are populated from the summary when available; slug-derived title is the fallback.
+            title   = slug.replace('-', ' ')
+            date    = None
+            branch  = None
+            summary = ''
+            done    = False
+            if os.path.exists(md_path):
+                try:
+                    content = open(md_path).read()
+                    title_m  = re.search(r'^#\\s+Quick Task:\\s*(.+)', content, re.MULTILINE)
+                    title    = title_m.group(1).strip() if title_m else title
+                    date_m   = re.search(r'\\*\\*Date:\\*\\*\\s*(\\S+)', content)
+                    date     = date_m.group(1) if date_m else None
+                    branch_m = re.search(r'\\*\\*Branch:\\*\\*\\s*(\\S+)', content)
+                    branch   = branch_m.group(1) if branch_m else None
+                    wc_m     = re.search(r'## What Changed\\s*\\n+(.+?)(?:\\n\\n|\\n##|$)', content, re.DOTALL)
+                    summary  = wc_m.group(1).strip()[:200] if wc_m else ''
+                    done     = True
+                except: pass
+            quick_tasks.append({
+                'id':      num,
+                'title':   title,
+                'date':    date,
+                'branch':  branch,
+                'summary': summary,
+                'slug':    slug,
+                'done':    done
+            })
     quick_tasks.sort(key=lambda t: (t['date'] or ''), reverse=True)
     result['quickTasks'] = quick_tasks
 except Exception as e:

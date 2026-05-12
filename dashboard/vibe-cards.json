@@ -14,7 +14,8 @@
         "color": "purple",
         "instanceName": "remote_gsdv2",
         "sessionName": "shell",
-        "jiraUrl": null
+        "jiraUrl": null,
+        "linkedQuickTaskId": 2
       },
       "comments": [
         {
@@ -24,7 +25,7 @@
         }
       ],
       "createdAt": "2026-05-12T18:24:33.207Z",
-      "updatedAt": "2026-05-12T19:02:59.387Z"
+      "updatedAt": "2026-05-12T19:11:25.555Z"
     }
   ]
 }
