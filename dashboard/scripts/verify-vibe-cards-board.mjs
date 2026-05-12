@@ -103,8 +103,22 @@ async function startManagedServer({ reseed = false, logDir = null } = {}) {
   const activeLogDir = logDir ?? mkdtempSync(resolve(tmpdir(), 'verify-vibe-cards-board-'))
   const stdoutPath = resolve(activeLogDir, 'server.stdout.log')
   const stderrPath = resolve(activeLogDir, 'server.stderr.log')
+  const browserTracePath = resolve(activeLogDir, 'browser-events.log')
   if (!existsSync(stdoutPath)) writeFileSync(stdoutPath, '')
   if (!existsSync(stderrPath)) writeFileSync(stderrPath, '')
+  if (!existsSync(browserTracePath)) writeFileSync(browserTracePath, '')
+
+  try {
+    await waitForServer()
+    return {
+      child: null,
+      stdoutPath,
+      stderrPath,
+      browserTracePath,
+      logDir: activeLogDir,
+      async stop() {}
+    }
+  } catch {}
 
   const child = spawn(process.execPath, [SERVER_ENTRY], {
     cwd: ROOT,
@@ -134,6 +148,7 @@ async function startManagedServer({ reseed = false, logDir = null } = {}) {
     child,
     stdoutPath,
     stderrPath,
+    browserTracePath,
     logDir: activeLogDir,
     async stop() {
       if (child.exitCode !== null) return
@@ -152,16 +167,24 @@ async function startManagedServer({ reseed = false, logDir = null } = {}) {
 function createBrowserDiagnostics(page) {
   const consoleErrors = []
   const failedRequests = []
+  const traceLines = []
 
   page.on('console', msg => {
+    const line = `[console:${msg.type()}] ${msg.text()}`
+    traceLines.push(line)
     if (msg.type() === 'error') consoleErrors.push(msg.text())
     if (msg.type() === 'debug' && msg.text().includes('[board] refresh deferred during drag')) {
       consoleErrors.push(`DEBUG:${msg.text()}`)
     }
   })
+  page.on('request', request => {
+    traceLines.push(`[request] ${request.method()} ${request.url()} ${request.postData() ?? ''}`.trim())
+  })
   page.on('requestfailed', request => {
     const url = request.url()
     const failureText = request.failure()?.errorText ?? 'request failed'
+    const line = `[requestfailed] ${request.method()} ${url} ${failureText}`
+    traceLines.push(line)
     const isExpectedAbort = failureText === 'net::ERR_ABORTED' && (
       url.includes('/api/events') || url.includes('/api/terminal/')
     )
@@ -170,18 +193,26 @@ function createBrowserDiagnostics(page) {
     }
   })
   page.on('response', async response => {
+    const line = `[response] ${response.request().method()} ${response.url()} ${response.status()}`
+    traceLines.push(line)
     if (response.status() >= 400) {
       failedRequests.push(`${response.request().method()} ${response.url()} ${response.status()}`)
     }
   })
 
-  return { consoleErrors, failedRequests }
+  return { consoleErrors, failedRequests, traceLines }
 }
 
 function assertNoUnexpectedDiagnostics({ consoleErrors, failedRequests }) {
   const unexpectedConsoleErrors = consoleErrors.filter(entry => !entry.startsWith('DEBUG:'))
   assert.equal(unexpectedConsoleErrors.length, 0, `Board should not emit console errors: ${unexpectedConsoleErrors.join('\n')}`)
   assert.equal(failedRequests.length, 0, `Board should not emit failed network requests: ${failedRequests.join('\n')}`)
+}
+
+function flushBrowserTrace(diagnostics) {
+  if (shouldManageServer && serverHandle?.browserTracePath) {
+    writeFileSync(serverHandle.browserTracePath, diagnostics.traceLines.join('\n') + '\n')
+  }
 }
 
 async function openBoard(page) {
@@ -252,10 +283,11 @@ async function verifyRender() {
     await page.locator('#panel-overlay.visible').waitFor({ state: 'visible' })
     const panelTitle = await page.locator('#panel-title').textContent()
     assert.ok(panelTitle?.includes('—'), 'Milestone card click should open a detail panel with a milestone title')
-    await page.click('.panel-close')
+    await page.locator('#panel-overlay .panel-close').click()
 
     assertNoUnexpectedDiagnostics(diagnostics)
   } finally {
+    flushBrowserTrace(diagnostics)
     await page.close()
     await browser.close()
   }
@@ -328,21 +360,195 @@ async function verifyDrag() {
     await panelOverlay.waitFor({ state: 'visible' })
     const panelTitle = await page.locator('#panel-title').textContent()
     assert.ok(panelTitle?.includes('—'), 'Milestone card click should open a detail panel with a milestone title')
-    await page.click('.panel-close')
+    await page.locator('#panel-overlay .panel-close').click()
 
     const stdout = shouldManageServer && serverHandle ? readFileSync(serverHandle.stdoutPath, 'utf8') : ''
-    if (shouldManageServer) {
+    if (shouldManageServer && serverHandle?.child) {
+      const patchSeen = patchRequests.some(request => request.postDataJSON()?.lane === 'in-progress')
+      assert.equal(patchSeen, true, 'Drag flow should emit a PATCH request for the new lane')
+      const stdout = readFileSync(serverHandle.stdoutPath, 'utf8')
       assert.match(stdout, /\[vibe-cards\] action=update id=render-backlog-card/, 'Server logs should show lane persistence update')
     }
 
     assertNoUnexpectedDiagnostics(diagnostics)
   } finally {
+    flushBrowserTrace(diagnostics)
     await page.close()
     await browser.close()
   }
 }
 
-if (!['render', 'drag'].includes(mode)) {
+async function verifyModal() {
+  const seedCheck = await request('/api/vibe-cards')
+  const existingSeed = seedCheck.json.cards.find(card => card.id === 'modal-bootstrap-card')
+  if (!existingSeed) {
+    const bootstrap = await request('/api/vibe-cards', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: 'modal-bootstrap-card',
+        title: 'Modal Bootstrap Card',
+        description: 'Ensures the board renders a Vibe card before modal checks',
+        lane: 'backlog',
+        status: 'open',
+        priority: 'medium',
+        tags: ['modal', 'bootstrap'],
+        metadata: { source: 'board-verify' }
+      })
+    })
+    assert.equal(bootstrap.res.status, 201, 'Modal verifier should be able to seed a bootstrap Vibe card through the API')
+  }
+
+  const browser = await chromium.launch({ headless: true })
+  const page = await browser.newPage()
+  const diagnostics = createBrowserDiagnostics(page)
+  const apiRequests = []
+
+  page.on('request', request => {
+    if (request.url().includes('/api/vibe-cards') && ['POST', 'PATCH', 'DELETE'].includes(request.method())) {
+      apiRequests.push({ method: request.method(), url: request.url(), body: request.postDataJSON?.() ?? null })
+    }
+  })
+
+  try {
+    await openBoard(page)
+
+    await page.click('button.vibe-add-btn')
+    await page.locator('#vibe-modal-overlay.visible').waitFor({ state: 'visible' })
+    await page.waitForSelector('#vibe-instance option', { state: 'attached' })
+
+    await page.fill('#vibe-title', 'Modal Flow Card')
+    await page.fill('#vibe-description', 'Created through modal verifier')
+    await page.selectOption('#vibe-lane', 'review')
+    await page.selectOption('#vibe-priority', 'high')
+    await page.selectOption('#vibe-status', 'blocked')
+    await page.selectOption('#vibe-color', 'green')
+
+    const instanceOptions = await page.locator('#vibe-instance option').evaluateAll(options =>
+      options.map(option => ({ value: option.value, text: option.textContent || '' }))
+    )
+    const preferredInstance = instanceOptions.find(option => option.value && option.value.toLowerCase() !== 'local')
+      ?? instanceOptions.find(option => option.value)
+
+    if (preferredInstance) {
+      await page.selectOption('#vibe-instance', preferredInstance.value)
+      await page.waitForFunction(() => {
+        const hint = document.querySelector('#vibe-session-hint')?.textContent || ''
+        return !hint.includes('Choose an instance to load sessions.') && !hint.includes('Loading sessions…')
+      })
+      const sessionHint = await page.locator('#vibe-session-hint').textContent()
+      const sessionDisabled = await page.locator('#vibe-session').isDisabled()
+      if (sessionHint?.includes('Session load failed')) {
+        assert.equal(sessionDisabled, true, 'Failed session loads should disable the session selector')
+      } else if (sessionHint?.includes('No tmux sessions found')) {
+        assert.equal(sessionDisabled, true, 'Empty session lists should disable the session selector')
+      } else {
+        assert.equal(sessionDisabled, false, 'Successful session loads should enable the session selector')
+      }
+    }
+
+    await page.fill('#vibe-jira', 'https://jira.example.com/browse/VIBE-123')
+    await page.fill('#vibe-labels', 'modal, verify')
+    await page.waitForFunction(() => {
+      const title = document.querySelector('#vibe-title')?.value?.trim() || ''
+      const submit = document.querySelector('#vibe-submit')
+      const derivedId = document.querySelector('#vibe-id')?.value || ''
+      return title === 'Modal Flow Card' && derivedId === 'modal-flow-card' && !!submit && !submit.disabled
+    })
+
+    const createRequestPromise = page.waitForRequest(request => request.method() === 'POST' && request.url().endsWith('/api/vibe-cards'))
+    const createResponsePromise = page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith('/api/vibe-cards') && response.status() === 201)
+    await page.click('#vibe-submit')
+    const createRequest = await createRequestPromise
+    const createResponse = await createResponsePromise
+    const createBody = createRequest.postDataJSON()
+    const createJson = await createResponse.json()
+
+    assert.equal(createBody.title, 'Modal Flow Card', 'Create payload should include the modal title')
+    assert.equal(createBody.description, 'Created through modal verifier', 'Create payload should include the modal description')
+    assert.equal(createBody.lane, 'review', 'Create payload should use the chosen lane')
+    assert.equal(createBody.priority, 'high', 'Create payload should include the chosen priority')
+    assert.equal(createBody.status, 'blocked', 'Create payload should include the chosen status')
+    assert.deepEqual(createBody.tags, ['modal', 'verify'], 'Create payload should normalize comma-separated labels into tags')
+    assert.equal(createBody.metadata?.color, 'green', 'Create payload should include metadata.color')
+    assert.equal(createBody.metadata?.jiraUrl, 'https://jira.example.com/browse/VIBE-123', 'Create payload should include metadata.jiraUrl')
+    assert.equal(createJson.card?.id, 'modal-flow-card', 'Created card id should derive from the title slug')
+
+    await page.locator('#vibe-modal-overlay.visible').waitFor({ state: 'hidden' })
+    await page.waitForSelector('[data-vibe-card-id="modal-flow-card"]')
+    await assertTextVisible(page.locator('#col-Validating'), 'Modal Flow Card')
+
+    await page.click('[data-vibe-card-id="modal-flow-card"]')
+    await page.locator('#vibe-modal-overlay.visible').waitFor({ state: 'visible' })
+    assert.equal(await page.locator('#vibe-id').inputValue(), 'modal-flow-card', 'Edit modal should preserve the persisted card id')
+
+    await page.fill('#vibe-description', 'Updated through modal verifier')
+    await page.fill('#vibe-labels', 'modal, edited')
+    await page.selectOption('#vibe-status', 'done')
+    await page.waitForFunction(() => {
+      const submit = document.querySelector('#vibe-submit')
+      const status = document.querySelector('#vibe-status')?.value || ''
+      const description = document.querySelector('#vibe-description')?.value || ''
+      return !!submit && !submit.disabled && status === 'done' && description === 'Updated through modal verifier'
+    })
+
+    const patchRequestPromise = page.waitForRequest(request => request.method() === 'PATCH' && request.url().includes('/api/vibe-cards/modal-flow-card'))
+    const patchResponsePromise = page.waitForResponse(response => response.request().method() === 'PATCH' && response.url().includes('/api/vibe-cards/modal-flow-card') && response.status() === 200, { timeout: 10000 })
+    await page.click('#vibe-submit')
+    const patchRequest = await patchRequestPromise
+    const patchResponse = await patchResponsePromise
+    const patchBody = patchRequest.postDataJSON()
+    const patchJson = await patchResponse.json()
+
+    assert.equal(patchBody.description, 'Updated through modal verifier', 'Edit payload should include the updated description')
+    assert.deepEqual(patchBody.tags, ['modal', 'edited'], 'Edit payload should rewrite tags from labels input')
+    assert.equal(patchBody.status, 'done', 'Edit payload should include the updated status')
+    assert.equal(patchJson.card?.status, 'done', 'PATCH response should include the updated status')
+
+    await page.locator('#vibe-modal-overlay.visible').waitFor({ state: 'hidden' })
+    await page.waitForSelector('[data-vibe-card-id="modal-flow-card"]')
+
+    const persistedAfterPatch = await request('/api/vibe-cards')
+    const editedCard = persistedAfterPatch.json.cards.find(card => card.id === 'modal-flow-card')
+    assert.equal(editedCard?.description, 'Updated through modal verifier', 'Updated description should persist via API state')
+    assert.deepEqual(editedCard?.tags, ['modal', 'edited'], 'Updated tags should persist via API state')
+
+    await page.click('[data-vibe-card-id="modal-flow-card"]')
+    await page.locator('#vibe-modal-overlay.visible').waitFor({ state: 'visible' })
+    const deleteResponsePromise = page.waitForResponse(response => response.request().method() === 'DELETE' && response.url().includes('/api/vibe-cards/modal-flow-card') && response.status() === 200)
+    await page.click('#vibe-delete')
+    await deleteResponsePromise
+    await page.locator('#vibe-modal-overlay.visible').waitFor({ state: 'hidden' })
+    await assert.rejects(
+      page.waitForSelector('[data-vibe-card-id="modal-flow-card"]', { state: 'attached', timeout: 800 }),
+      /Timeout/,
+      'Deleted card should be removed from the board'
+    )
+
+    const persistedAfterDelete = await request('/api/vibe-cards')
+    assert.equal(persistedAfterDelete.json.cards.some(card => card.id === 'modal-flow-card'), false, 'Deleted card should be removed from persisted API state')
+
+    const methods = apiRequests.map(request => request.method)
+    assert.ok(methods.includes('POST'), 'Modal flow should issue a create request')
+    assert.ok(methods.includes('PATCH'), 'Modal flow should issue an update request')
+    assert.ok(methods.includes('DELETE'), 'Modal flow should issue a delete request')
+
+    if (shouldManageServer && serverHandle?.child) {
+      const stdout = readFileSync(serverHandle.stdoutPath, 'utf8')
+      assert.match(stdout, /\[vibe-cards\] action=create id=modal-flow-card/, 'Server logs should show create action')
+      assert.match(stdout, /\[vibe-cards\] action=update id=modal-flow-card/, 'Server logs should show update action')
+      assert.match(stdout, /\[vibe-cards\] action=delete id=modal-flow-card/, 'Server logs should show delete action')
+    }
+
+    assertNoUnexpectedDiagnostics(diagnostics)
+  } finally {
+    flushBrowserTrace(diagnostics)
+    await page.close()
+    await browser.close()
+  }
+}
+
+if (!['render', 'drag', 'modal'].includes(mode)) {
   throw new Error(`Unsupported mode '${mode}'`)
 }
 
@@ -353,8 +559,10 @@ try {
   serverHandle = shouldManageServer ? await startManagedServer({ reseed: true }) : null
   if (mode === 'render') {
     await verifyRender()
-  } else {
+  } else if (mode === 'drag') {
     await verifyDrag()
+  } else {
+    await verifyModal()
   }
   console.log(`verify-vibe-cards-board: ${mode} ok (${BASE_URL})`)
 } finally {
