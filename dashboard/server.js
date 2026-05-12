@@ -209,6 +209,7 @@ function serializeCard(card) {
     priority: card.priority,
     tags: card.tags,
     metadata: card.metadata,
+    comments: Array.isArray(card.comments) ? card.comments : [],
     createdAt: card.createdAt,
     updatedAt: card.updatedAt
   }
@@ -229,6 +230,7 @@ function buildCardFromCreate(body) {
     priority: body.priority ?? null,
     tags: body.tags ?? [],
     metadata: body.metadata ?? {},
+    comments: [],
     createdAt: body.createdAt ?? nowIso,
     updatedAt: body.updatedAt ?? nowIso
   }, nowIso)
@@ -253,6 +255,7 @@ function applyCardPatch(existingCard, patch) {
     priority: Object.prototype.hasOwnProperty.call(patch, 'priority') ? patch.priority : existingCard.priority,
     tags: Object.prototype.hasOwnProperty.call(patch, 'tags') ? patch.tags : existingCard.tags,
     metadata: Object.prototype.hasOwnProperty.call(patch, 'metadata') ? patch.metadata : existingCard.metadata,
+    comments: existingCard.comments ?? [],
     updatedAt: new Date().toISOString()
   })
 
@@ -585,6 +588,28 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: instances.every(i => i.ok), instances })
 })
 
+/**
+ * GET /api/pick-folder
+ * Opens a native macOS folder picker dialog and returns the selected path.
+ * Only works on macOS (uses osascript). Returns { path } or { error }.
+ */
+app.get('/api/pick-folder', (req, res) => {
+  try {
+    const script = `
+      set theFolder to choose folder with prompt "Select project directory"
+      POSIX path of theFolder
+    `
+    const result = execFileSync('osascript', ['-e', script], { encoding: 'utf8', timeout: 60000 }).trim()
+    res.json({ path: result.replace(/\/$/, '') })
+  } catch (err) {
+    if (err.stderr?.includes('User canceled') || err.message?.includes('User canceled') || err.status === 1) {
+      res.json({ cancelled: true })
+    } else {
+      res.status(500).json({ error: err.message })
+    }
+  }
+})
+
 app.get('/api/terminal-prefs', (req, res) => res.json(terminalPrefs))
 
 app.post('/api/terminal-prefs', (req, res) => {
@@ -678,6 +703,65 @@ app.delete('/api/vibe-cards/:id', (req, res) => {
   } catch {
     vibeCardStore.cards.splice(index, 0, removedCard)
     res.status(500).json({ error: 'failed to persist vibe card' })
+  }
+})
+
+/**
+ * POST /api/vibe-cards/:id/comments
+ * Body: { text: string }
+ * Appends a comment to the card. Returns { ok, comment, card }.
+ */
+app.post('/api/vibe-cards/:id/comments', (req, res) => {
+  const index = vibeCardStore.cards.findIndex(card => card.id === req.params.id)
+  if (index === -1) return res.status(404).json({ error: 'card not found' })
+
+  const text = (req.body?.text ?? '').trim()
+  if (!text) return res.status(400).json({ error: 'comment text is required' })
+
+  const comment = {
+    id: `c-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    text,
+    createdAt: new Date().toISOString()
+  }
+
+  const card = vibeCardStore.cards[index]
+  const previousComments = card.comments ?? []
+  card.comments = [...previousComments, comment]
+  card.updatedAt = new Date().toISOString()
+
+  try {
+    persistVibeCards('comment-add', card.id)
+    console.log(`[vibe-cards] action=comment-add id=${card.id} comment=${comment.id}`)
+    res.status(201).json({ ok: true, comment, card: serializeCard(card) })
+  } catch {
+    card.comments = previousComments
+    res.status(500).json({ error: 'failed to persist comment' })
+  }
+})
+
+/**
+ * DELETE /api/vibe-cards/:id/comments/:commentId
+ * Removes a single comment from the card.
+ */
+app.delete('/api/vibe-cards/:id/comments/:commentId', (req, res) => {
+  const index = vibeCardStore.cards.findIndex(card => card.id === req.params.id)
+  if (index === -1) return res.status(404).json({ error: 'card not found' })
+
+  const card = vibeCardStore.cards[index]
+  const previousComments = card.comments ?? []
+  const commentIndex = previousComments.findIndex(c => c.id === req.params.commentId)
+  if (commentIndex === -1) return res.status(404).json({ error: 'comment not found' })
+
+  card.comments = previousComments.filter(c => c.id !== req.params.commentId)
+  card.updatedAt = new Date().toISOString()
+
+  try {
+    persistVibeCards('comment-delete', card.id)
+    console.log(`[vibe-cards] action=comment-delete id=${card.id} comment=${req.params.commentId}`)
+    res.json({ ok: true })
+  } catch {
+    card.comments = previousComments
+    res.status(500).json({ error: 'failed to persist comment deletion' })
   }
 })
 
