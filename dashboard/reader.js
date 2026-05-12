@@ -168,13 +168,13 @@ except Exception as e:
     result['errors'].append({'source': 'active-session', 'error': str(e)})
 
 # Auto-mode running detection — last journal unit-start has no subsequent unit-end
+# and is recent (within 30 minutes) to avoid stale open units from test events etc.
 try:
     result['autoModeRunning'] = False
     result['autoModeUnit'] = None
     journals = sorted(glob.glob(GSD + '/journal/*.jsonl'))
     if journals:
         all_lines = []
-        # Check last 2 journal files in case we crossed midnight
         for jf in journals[-2:]:
             all_lines.extend([l.strip() for l in open(jf).readlines() if l.strip()])
         events = []
@@ -186,9 +186,19 @@ try:
         if last_start:
             ts_start = last_start.get('ts', '')
             ts_end   = last_end.get('ts', '') if last_end else ''
+            # Only count as running if unit-start is newer than unit-end
+            # AND the unit-start is within the last 30 minutes (staleness guard)
             if ts_start > ts_end:
-                result['autoModeRunning'] = True
-                result['autoModeUnit'] = last_start.get('data', {}).get('unitId')
+                import datetime as _dt
+                try:
+                    start_dt = _dt.datetime.fromisoformat(ts_start.replace('Z', '+00:00'))
+                    now_dt   = _dt.datetime.now(_dt.timezone.utc)
+                    age_mins = (now_dt - start_dt).total_seconds() / 60
+                    if age_mins <= 30:
+                        result['autoModeRunning'] = True
+                        result['autoModeUnit'] = last_start.get('data', {}).get('unitId')
+                except Exception:
+                    pass  # date parse error — don't mark as running
 except Exception as e:
     result['errors'].append({'source': 'auto-mode-detect', 'error': str(e)})
 
