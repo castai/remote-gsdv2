@@ -1130,16 +1130,67 @@
     }
 
     /* ── Journal events ───────────────────────────────────────── */
-    .journal-row {
+    .journal-section {
       display: flex;
-      gap: 8px;
-      padding: 4px 0;
-      font-size: 11px;
+      flex-direction: column;
+      height: 260px;
     }
 
-    .journal-ts { color: var(--muted); font-family: monospace; flex-shrink: 0; }
-    .journal-type { color: var(--accent); flex-shrink: 0; }
-    .journal-unit { color: var(--muted); }
+    .journal-section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .journal-live-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--healthy);
+      animation: pulse-dot 1.5s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+
+    .journal-scroll {
+      flex: 1;
+      overflow-y: auto;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 11px;
+      background: var(--surface2);
+      border-radius: 6px;
+      padding: 8px;
+      scrollbar-width: thin;
+    }
+
+    .journal-row {
+      display: flex;
+      align-items: baseline;
+      gap: 7px;
+      padding: 2px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+      line-height: 1.5;
+    }
+
+    .journal-row.new {
+      animation: journal-flash 0.6s ease-out;
+    }
+
+    @keyframes journal-flash {
+      from { background: rgba(99,102,241,0.2); }
+      to   { background: transparent; }
+    }
+
+    .journal-ts    { color: var(--muted); flex-shrink: 0; font-size: 10px; }
+    .journal-type  { color: var(--accent); flex-shrink: 0; min-width: 100px; }
+    .journal-type.unit-start  { color: var(--healthy); }
+    .journal-type.unit-end    { color: var(--muted); }
+    .journal-type.auto-exit   { color: var(--awaiting); }
+    .journal-unit  { color: var(--text); flex-shrink: 0; }
+    .journal-status { flex-shrink: 0; }
+    .journal-status.completed { color: var(--healthy); }
+    .journal-status.cancelled { color: var(--errored); }
+    .journal-err   { color: var(--errored); font-size: 10px; flex: 1;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
     /* ── Offline banner ───────────────────────────────────────── */
     .offline-card {
@@ -1638,11 +1689,14 @@ poll()
     try {
       const event = JSON.parse(e.data)
       if (!event) return
-      // Immediate repoll on any meaningful GSD event
+      // Append to open panel's journal if it's a real GSD event
+      if (event.source && event.eventType && event.eventType !== 'poll-tick') {
+        appendJournalEvent(event.source, event)
+      }
+      // Trigger immediate repoll on meaningful events
       if (event.eventType && event.eventType !== 'poll-tick') {
         poll()
       }
-      // poll-tick: server already polled, just re-fetch (same as normal poll)
       if (event.type === 'poll-tick') {
         poll()
       }
@@ -1708,10 +1762,11 @@ function render(data) {
   renderBoard(visibleMilestones, data.instances, visibleQuickTasks)
   renderQueue(attentionItems)
 
-  // Re-render open panel if one is selected
+  // Re-render open panel if one is selected — preserve journal scroll
   if (selectedCard) {
-    const refreshed = allMilestones.find(m => m.id === selectedCard.id && m._instance.name === selectedCard._instance.name)
-    if (refreshed) openPanel(refreshed)
+    const refreshed = allMilestones.find(m =>
+      m.id === selectedCard.id && m._instance.name === selectedCard._instance.name)
+    if (refreshed) openPanel(refreshed, true)
   }
 }
 
@@ -1895,7 +1950,7 @@ function renderQueue(items) {
 
 // ── Slide-over panel ─────────────────────────────────────────────────────────
 
-function openPanel(m) {
+function openPanel(m, preserveJournal = false) {
   selectedCard = m
   const inst   = m._instance
   const icolor = getInstanceColor(inst.name)
@@ -1968,17 +2023,25 @@ Type: ${esc(ps.unitType || '—')}</div>
 
   // Recent journal events
   const journal = inst.recentJournalEvents || []
-  if (journal.length) {
-    html += `<div class="panel-section"><div class="panel-section-title">Recent Activity</div>`
-    for (const ev of journal.slice(-6)) {
-      html += `<div class="journal-row">
-        <span class="journal-ts">${(ev.ts||'').slice(11,19)}</span>
-        <span class="journal-type">${esc(ev.eventType||'')}</span>
-        <span class="journal-unit">${esc(ev.unitId||ev.rule||'')}</span>
-      </div>`
-    }
-    html += `</div>`
-  }
+  // Journal section — save existing scroll contents if preserving
+  const journalScrollId = `journal-scroll-${esc(inst.name)}`
+  const existingScroll  = preserveJournal ? document.getElementById(journalScrollId) : null
+  const savedScrollHtml = existingScroll?.innerHTML ?? null
+  const savedScrollTop  = existingScroll ? existingScroll.scrollTop : null
+  const atBottom        = existingScroll
+    ? existingScroll.scrollHeight - existingScroll.scrollTop - existingScroll.clientHeight < 40
+    : true
+
+  html += `
+    <div class="panel-section journal-section">
+      <div class="journal-section-header">
+        <span class="panel-section-title" style="margin-bottom:0">Journal</span>
+        <span class="journal-live-dot" title="Live"></span>
+      </div>
+      <div class="journal-scroll" id="${journalScrollId}">
+        ${savedScrollHtml !== null ? savedScrollHtml : journal.map(ev => journalRowHtml(ev, false)).join('')}
+      </div>
+    </div>`
 
   // Slices
   if (slices.length) {
@@ -2014,6 +2077,16 @@ Type: ${esc(ps.unitType || '—')}</div>
 
   body.innerHTML = html
   document.getElementById('panel-overlay').classList.add('visible')
+  // Restore or scroll journal
+  requestAnimationFrame(() => {
+    const scroll = document.getElementById(`journal-scroll-${inst.name}`)
+    if (!scroll) return
+    if (preserveJournal && savedScrollTop !== null && !atBottom) {
+      scroll.scrollTop = savedScrollTop
+    } else {
+      scroll.scrollTop = scroll.scrollHeight
+    }
+  })
 }
 
 function closePanel(e) {
@@ -2063,6 +2136,52 @@ function openQuickPanel(qt) {
 
   body.innerHTML = html
   document.getElementById('panel-overlay').classList.add('visible')
+}
+
+// ── Journal ──────────────────────────────────────────────────────────────────
+
+function journalRowHtml(ev, isNew) {
+  const et  = ev.eventType || ''
+  // Convert UTC timestamp to local HH:MM:SS
+  let ts = ''
+  if (ev.ts) {
+    try {
+      ts = new Date(ev.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+    } catch { ts = (ev.ts || '').slice(11, 19) }
+  }
+  const unit     = ev.unitId || ev.rule || (ev.iteration ? `iter ${ev.iteration}` : '')
+  const status   = ev.status || ''
+  const errMsg   = ev.error ? ev.error.slice(0, 60) : ''
+  const typeClass = et === 'unit-start' ? 'unit-start'
+                  : et === 'unit-end'   ? 'unit-end'
+                  : et === 'auto-exit'  ? 'auto-exit' : ''
+  const statusClass = status === 'completed' ? 'completed'
+                    : status === 'cancelled'  ? 'cancelled' : ''
+  return `<div class="journal-row${isNew ? ' new' : ''}">
+    <span class="journal-ts">${esc(ts)}</span>
+    <span class="journal-type ${typeClass}">${esc(et)}</span>
+    ${unit  ? `<span class="journal-unit">${esc(unit)}</span>` : ''}
+    ${status ? `<span class="journal-status ${statusClass}">${esc(status)}</span>` : ''}
+    ${errMsg ? `<span class="journal-err" title="${esc(ev.error || '')}">${esc(errMsg)}</span>` : ''}
+  </div>`
+}
+
+// Append live SSE events to the open panel's journal scroll area
+function appendJournalEvent(instName, ev) {
+  if (!selectedCard || selectedCard._instance.name !== instName) return
+  const scroll = document.getElementById(`journal-scroll-${instName}`)
+  if (!scroll) return
+
+  const atBottom = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 40
+
+  const row = document.createElement('div')
+  row.innerHTML = journalRowHtml(ev, true)
+  scroll.appendChild(row.firstElementChild)
+
+  // Keep max 200 rows to avoid memory creep
+  while (scroll.children.length > 200) scroll.removeChild(scroll.firstChild)
+
+  if (atBottom) scroll.scrollTop = scroll.scrollHeight
 }
 
 // ── Terminal ─────────────────────────────────────────────────────────────────

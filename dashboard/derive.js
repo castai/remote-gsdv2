@@ -120,7 +120,15 @@ function deriveAttention(milestone, { pausedSession, stuckState, recentNotificat
     }
 
     // ── Non-step-mode: real errors ───────────────────────────────────────────
-    if (lastError && lastError.unitId && lastError.unitId.startsWith(mid + '/')) {
+    // If there's an active session the user/auto-mode is working — not blocked
+    if (hasActiveSession) {
+      return { attention: 'Healthy', attentionDetail: null }
+    }
+
+    // lastError.unitId may equal mid (milestone-level unit) or mid/... (slice/task)
+    const errBelongsHere = lastError && lastError.unitId &&
+      (lastError.unitId === mid || lastError.unitId.startsWith(mid + '/'))
+    if (errBelongsHere) {
       const transient = lastError.isTransient ? ' (transient)' : ''
       return {
         attention:       lastError.isTransient ? 'Blocked' : 'Errored',
@@ -156,7 +164,8 @@ function deriveAttention(milestone, { pausedSession, stuckState, recentNotificat
   }
 
   // ── Not paused ──────────────────────────────────────────────────────────────
-  if (lastError && lastError.unitId && lastError.unitId.startsWith(mid + '/')) {
+  if (lastError && lastError.unitId &&
+      (lastError.unitId === mid || lastError.unitId.startsWith(mid + '/'))) {
     return {
       attention:       lastError.isTransient ? 'Blocked' : 'Errored',
       attentionDetail: `${lastError.unitId} ${lastError.status ?? 'cancelled'}: ${lastError.message}`
@@ -273,8 +282,11 @@ export function deriveInstance(rawState) {
     })
 
     // Badge: auto-mode is actively running a unit for this milestone
+    // Auto badge: unit belongs to this milestone if it equals milestone.id
+    // or starts with milestone.id/ (slice/task level)
+    const autoUnit = rawState.autoModeUnit ?? ''
     const isAutoRunning = rawState.autoModeRunning === true &&
-      (rawState.autoModeUnit ?? '').startsWith(milestone.id + '/')
+      (autoUnit === milestone.id || autoUnit.startsWith(milestone.id + '/'))
 
     return { ...milestone, ...derived, isAutoRunning }
   })

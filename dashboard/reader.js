@@ -108,13 +108,15 @@ try:
                     'ts':           e.get('ts'),
                     'eventType':    e.get('eventType'),
                     'unitId':       e.get('data', {}).get('unitId'),
+                    'unitType':     e.get('data', {}).get('unitType'),
                     'rule':         e.get('data', {}).get('rule'),
                     'status':       e.get('data', {}).get('status'),
+                    'iteration':    e.get('data', {}).get('iteration'),
                     'error':        ec.get('message'),
                     'errorCategory': ec.get('category'),
                     'isTransient':  ec.get('isTransient'),
                 })
-                if len(events) >= 10: break
+                if len(events) >= 50: break
             except: pass
         result['recentJournalEvents'] = list(reversed(events))
         # Surface the most recent error event at the top level for easy derive access
