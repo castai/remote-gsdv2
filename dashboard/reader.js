@@ -132,6 +132,64 @@ try:
 except Exception as e:
     result['errors'].append({'source': 'journal', 'error': str(e)})
 
+# Active session detection — scan ~/.gsd/sessions/<project>/ for recently modified files.
+# This detects interactive (non-auto-mode) sessions that don't write to the journal.
+try:
+    import time as _time
+    sessions_base = os.path.expanduser('~/.gsd/sessions/')
+    sessions_dir = None
+    if os.path.exists(sessions_base):
+        # GSD slugifies the base path: /home/gsd/workspace/foo/.gsd → --home-gsd-workspace-foo--
+        # Build the expected slug from GSD path (strip /.gsd, replace / with -)
+        base_path = GSD.rstrip('/').removesuffix('/.gsd').removesuffix('.gsd')
+        expected_slug = base_path.replace('/', '-')  # e.g. -home-gsd-workspace-salesanalyzer-
+        for d in os.listdir(sessions_base):
+            # Match: strip leading/trailing dashes from both for comparison
+            if d.strip('-') == expected_slug.strip('-'):
+                sessions_dir = os.path.join(sessions_base, d)
+                break
+    if sessions_dir and os.path.exists(sessions_dir):
+        now = _time.time()
+        recent_thresh = 5 * 60  # 5 minutes
+        most_recent_mtime = 0
+        for f in os.listdir(sessions_dir):
+            fp = os.path.join(sessions_dir, f)
+            if os.path.isfile(fp):
+                mt = os.path.getmtime(fp)
+                if mt > most_recent_mtime:
+                    most_recent_mtime = mt
+        if most_recent_mtime > 0:
+            age_seconds = now - most_recent_mtime
+            result['activeSessionAgeSecs'] = round(age_seconds)
+            result['hasActiveSession'] = age_seconds < recent_thresh
+except Exception as e:
+    result['errors'].append({'source': 'active-session', 'error': str(e)})
+
+# Auto-mode running detection — last journal unit-start has no subsequent unit-end
+try:
+    result['autoModeRunning'] = False
+    result['autoModeUnit'] = None
+    journals = sorted(glob.glob(GSD + '/journal/*.jsonl'))
+    if journals:
+        all_lines = []
+        # Check last 2 journal files in case we crossed midnight
+        for jf in journals[-2:]:
+            all_lines.extend([l.strip() for l in open(jf).readlines() if l.strip()])
+        events = []
+        for l in all_lines:
+            try: events.append(json.loads(l))
+            except: pass
+        last_start = next((e for e in reversed(events) if e.get('eventType') == 'unit-start'), None)
+        last_end   = next((e for e in reversed(events) if e.get('eventType') == 'unit-end'), None)
+        if last_start:
+            ts_start = last_start.get('ts', '')
+            ts_end   = last_end.get('ts', '') if last_end else ''
+            if ts_start > ts_end:
+                result['autoModeRunning'] = True
+                result['autoModeUnit'] = last_start.get('data', {}).get('unitId')
+except Exception as e:
+    result['errors'].append({'source': 'auto-mode-detect', 'error': str(e)})
+
 # quick/ tasks — parse SUMMARY.md files from each numbered subdir
 try:
     quick_dir = GSD + '/quick'

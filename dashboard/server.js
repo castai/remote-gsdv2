@@ -5,11 +5,17 @@
  * POST   /api/instances              — register a new local instance
  * DELETE /api/instances/:name        — remove an instance
  * GET    /api/health                 — instance health summary
+ * GET    /api/events                 — SSE stream of real-time GSD journal events
  * GET    /api/terminal/:name         — list tmux sessions + ttyd port
  * POST   /api/terminal/:name/session — create a named tmux session
  * GET    /api/terminal-prefs         — read terminal preferences
  * POST   /api/terminal-prefs        — update terminal preferences (restarts ttyd)
  * GET    /terminal-page/:name        — full-page terminal HTML (new tab)
+ *
+ * Real-time architecture:
+ *   pod: gsd-journal-watcher.py tails journal → PUBLISH gsd:events:<name> to Redis
+ *   server: Redis SUBSCRIBE gsd:events:* → invalidate cache + push SSE to browser
+ *   browser: EventSource /api/events → immediate re-poll on unit-start/unit-end
  */
 
 import express from 'express'
@@ -19,6 +25,7 @@ import { execFileSync, spawn } from 'child_process'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { createServer } from 'http'
+import Redis from 'ioredis'
 import { readInstance } from './reader.js'
 import { deriveInstance } from './derive.js'
 
@@ -129,6 +136,142 @@ function ensureTtyd(cfg) {
 
 process.on('exit', () => { for (const { proc } of ttydProcs.values()) try { proc.kill() } catch {} })
 
+// ─── Redis pubsub + SSE ───────────────────────────────────────────────────────
+// Port-forward openclaw/redis → localhost:6380, then subscribe to gsd:events:*
+
+const REDIS_LOCAL_PORT   = parseInt(process.env.REDIS_LOCAL_PORT ?? '6380', 10)
+const REDIS_SERVICE      = 'redis'
+const REDIS_NAMESPACE    = 'openclaw'
+const WATCHER_SCRIPT     = resolve(__dir, 'gsd-journal-watcher.py')
+const REDIS_CLUSTER_IP   = '34.118.237.138'  // openclaw/redis ClusterIP
+const REDIS_CLUSTER_PORT = 6379
+
+// SSE clients — Set of { res, instFilter }
+const sseClients = new Set()
+
+function broadcastSSE(event) {
+  const data = `data: ${JSON.stringify(event)}\n\n`
+  for (const client of sseClients) {
+    try { client.write(data) } catch { sseClients.delete(client) }
+  }
+}
+
+// Start port-forward to Redis
+let redisPf = null
+function ensureRedisPf() {
+  if (redisPf && redisPf.exitCode === null) return
+  console.log(`[redis] port-forwarding ${REDIS_NAMESPACE}/${REDIS_SERVICE} → localhost:${REDIS_LOCAL_PORT}`)
+  redisPf = spawn(KUBECTL, [
+    'port-forward', `svc/${REDIS_SERVICE}`, '-n', REDIS_NAMESPACE,
+    `${REDIS_LOCAL_PORT}:${REDIS_CLUSTER_PORT}`
+  ], { stdio: 'pipe' })
+  redisPf.on('exit', code => {
+    console.log(`[redis] port-forward exited code=${code}, restarting in 3s`)
+    redisPf = null
+    setTimeout(startRedisSubscriber, 3000)
+  })
+}
+
+// Redis subscriber
+let redisSub = null
+function startRedisSubscriber() {
+  ensureRedisPf()
+  // Give port-forward a moment to bind
+  setTimeout(() => {
+    if (redisSub) { try { redisSub.disconnect() } catch {} }
+    redisSub = new Redis({ host: 'localhost', port: REDIS_LOCAL_PORT, lazyConnect: true,
+      retryStrategy: () => 3000, maxRetriesPerRequest: null })
+
+    redisSub.on('connect', () => console.log(`[redis] subscriber connected on :${REDIS_LOCAL_PORT}`))
+    redisSub.on('error',   e  => console.warn(`[redis] subscriber error: ${e.message}`))
+
+    redisSub.subscribe('gsd:events:*', (err, count) => {
+      if (err) console.warn('[redis] subscribe error:', err.message)
+      else console.log(`[redis] subscribed to gsd:events:* (${count} channel(s))`)
+    })
+
+    // ioredis doesn't support glob subscribe — use psubscribe
+    redisSub.disconnect()
+    redisSub = new Redis({ host: 'localhost', port: REDIS_LOCAL_PORT, lazyConnect: true,
+      retryStrategy: () => 3000, maxRetriesPerRequest: null })
+    redisSub.on('connect', () => console.log(`[redis] subscriber ready`))
+    redisSub.on('error',   e  => { /* suppress reconnect noise */ })
+    redisSub.psubscribe('gsd:events:*', err => {
+      if (err) console.warn('[redis] psubscribe error:', err.message)
+    })
+    redisSub.on('pmessage', (pattern, channel, message) => {
+      // channel format: gsd:events:<instanceName>
+      const instName = channel.split(':')[2]
+      let event
+      try { event = JSON.parse(message) } catch { return }
+
+      console.log(`[redis] ${instName} ${event.eventType} ${event.unitId ?? ''} ${event.status ?? ''}`)
+
+      // Invalidate cache and re-poll immediately
+      const cfg = instanceConfigs.find(i => i.name === instName)
+      if (cfg) pollInstance(cfg).then(() => {
+        broadcastSSE({ source: instName, ...event })
+      })
+      else broadcastSSE({ source: instName, ...event })
+    })
+  }, 1500)
+}
+
+// Start Redis subscriber (best-effort — dashboard works without it)
+startRedisSubscriber()
+
+// Start journal watcher on each pod instance
+async function startJournalWatcher(cfg) {
+  if (!cfg.pod) return
+  const ns      = cfg.namespace ?? 'lk-gsd'
+  const ctr     = cfg.container ?? 'gsd'
+  const gsdPath = cfg.gsdPath ?? '/home/gsd/workspace/salesanalyzer/.gsd'
+  const channel = `gsd:events:${cfg.name}`
+
+  try {
+    // Copy watcher script to pod (skip if already there with same size)
+    const localSize = readFileSync(WATCHER_SCRIPT).length
+    let remoteSize  = 0
+    try {
+      const out = execFileSync(KUBECTL, [
+        'exec', cfg.pod, '-n', ns, '-c', ctr, '--',
+        'stat', '-c', '%s', '/tmp/gsd-journal-watcher.py'
+      ], { encoding: 'utf8', timeout: 5000 })
+      remoteSize = parseInt(out.trim()) || 0
+    } catch {}
+
+    if (remoteSize !== localSize) {
+      execFileSync(KUBECTL, [
+        'cp', WATCHER_SCRIPT,
+        `${cfg.pod}:/tmp/gsd-journal-watcher.py`,
+        '-n', ns, '-c', ctr
+      ], { encoding: 'utf8', timeout: 15000 })
+      console.log(`[watcher] copied script to ${cfg.name}`)
+    }
+
+    // Launch watcher in a tmux window using a non-blocking spawn
+    // We do this in two steps to avoid the compound command getting SIGTERM
+    // Kill existing watcher (pkill exits 143 on success — catch it)
+    try {
+      execFileSync(KUBECTL, ['exec', cfg.pod, '-n', ns, '-c', ctr, '--',
+        'pkill', '-f', 'gsd-journal-watcher'], { encoding: 'utf8', timeout: 5000 })
+    } catch { /* 143 = killed a process, that's fine */ }
+
+    await new Promise(r => setTimeout(r, 400))
+
+    // Launch in a new tmux window — command runs directly, survives kubectl exit
+    const launchCmd = `python3 /tmp/gsd-journal-watcher.py '${gsdPath}' '${REDIS_CLUSTER_IP}' '${REDIS_CLUSTER_PORT}' '${channel}'`
+    execFileSync(KUBECTL, [
+      'exec', cfg.pod, '-n', ns, '-c', ctr, '--',
+      'tmux', 'new-window', '-t', 'gsd:', '-n', 'gsd-watcher', launchCmd
+    ], { encoding: 'utf8', timeout: 5000 })
+
+    console.log(`[watcher] launching on ${cfg.name} → ${channel}`)
+  } catch (e) {
+    console.warn(`[watcher] setup failed on ${cfg.name}: ${e.message.slice(0, 80)}`)
+  }
+}
+
 // ─── State cache + polling ────────────────────────────────────────────────────
 
 const cache = new Map()
@@ -150,7 +293,17 @@ async function pollInstance(config) {
 
 async function pollAll() { await Promise.all(instanceConfigs.map(pollInstance)) }
 await pollAll()
+
+// Start journal watchers for pod instances (non-blocking, after server is ready)
+setTimeout(() => {
+  for (const cfg of instanceConfigs.filter(i => i.pod)) {
+    startJournalWatcher(cfg)
+  }
+}, 3000)
+
 setInterval(pollAll, POLL_MS)
+// Broadcast a poll-tick SSE on every cycle so browser can refresh without Redis
+setInterval(() => broadcastSSE({ type: 'poll-tick', ts: new Date().toISOString() }), POLL_MS)
 console.log(`[server] Polling ${instanceConfigs.length} instance(s) every ${POLL_MS}ms`)
 
 // ─── Express app ──────────────────────────────────────────────────────────────
@@ -206,6 +359,30 @@ app.delete('/api/instances/:name', (req, res) => {
   if (pf) { try { pf.proc.kill() } catch {} ttydProcs.delete(req.params.name) }
   console.log(`[server] removed instance '${req.params.name}'`)
   res.json({ ok: true })
+})
+
+/**
+ * GET /api/events
+ * Server-Sent Events stream. Browser subscribes once; server pushes on each
+ * Redis pubsub message (real-time) or on every poll cycle (fallback heartbeat).
+ */
+app.get('/api/events', (req, res) => {
+  res.setHeader('Content-Type',  'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection',    'keep-alive')
+  res.flushHeaders()
+
+  // Send a heartbeat comment every 15s to keep connection alive
+  const hb = setInterval(() => { try { res.write(': heartbeat\n\n') } catch {} }, 15000)
+
+  sseClients.add(res)
+  console.log(`[sse] client connected (${sseClients.size} total)`)
+
+  req.on('close', () => {
+    clearInterval(hb)
+    sseClients.delete(res)
+    console.log(`[sse] client disconnected (${sseClients.size} remaining)`)
+  })
 })
 
 app.get('/api/health', (req, res) => {

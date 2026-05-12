@@ -630,6 +630,35 @@
       flex-wrap: wrap;
     }
 
+    /* Auto-mode running badge */
+    .auto-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--healthy);
+      background: #0a2a1e;
+      border: 1px solid #15523a;
+      border-radius: 4px;
+      padding: 1px 6px;
+      margin-left: auto;
+    }
+
+    .auto-badge-dot {
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: var(--healthy);
+      animation: pulse-dot 1.5s ease-in-out infinite;
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.4; transform: scale(0.7); }
+    }
+
     .instance-chip {
       font-size: 10px;
       color: var(--muted);
@@ -1208,17 +1237,6 @@
   </div>
 </div>
 
-<!-- Full-screen terminal overlay — outside the slide-over -->
-<div id="terminal-overlay">
-  <div id="terminal-overlay-bar">
-    <span id="terminal-overlay-title">—</span>
-    <span id="terminal-overlay-session">—</span>
-    <button id="terminal-overlay-pick" onclick="repickSession()" title="Switch session">⇄ Switch session</button>
-    <button id="terminal-overlay-back" onclick="closeTerminal()">← Back to board</button>
-  </div>
-  <iframe id="ttyd-frame" src="about:blank" allow="clipboard-read; clipboard-write"></iframe>
-</div>
-
 <script>
 const PHASES = ['Discussing','Researching','Planning','Executing','Validating','Done']
 const API    = 'http://localhost:3001/api/instances'
@@ -1605,8 +1623,41 @@ async function poll() {
   }
 }
 
+// Fallback polling — keeps working if SSE/Redis is down
 setInterval(poll, POLL)
 poll()
+
+// ── Real-time SSE subscription ───────────────────────────────────────────────
+// Subscribes to server-sent events. On unit-start/unit-end, triggers an
+// immediate poll so the board updates without waiting for the 5s interval.
+
+;(function connectSSE() {
+  const es = new EventSource('/api/events')
+
+  es.onmessage = (e) => {
+    try {
+      const event = JSON.parse(e.data)
+      if (!event) return
+      // Immediate repoll on any meaningful GSD event
+      if (event.eventType && event.eventType !== 'poll-tick') {
+        poll()
+      }
+      // poll-tick: server already polled, just re-fetch (same as normal poll)
+      if (event.type === 'poll-tick') {
+        poll()
+      }
+    } catch {}
+  }
+
+  es.onerror = () => {
+    // SSE disconnected — browser will auto-reconnect, polling continues as fallback
+    document.getElementById('status-dot').title = 'SSE disconnected (polling)'
+  }
+
+  es.onopen = () => {
+    document.getElementById('status-dot').title = 'Live (SSE connected)'
+  }
+})()
 
 // ── Tab switching ────────────────────────────────────────────────────────────
 
@@ -1763,6 +1814,9 @@ function makeCard(m) {
       ${m.attention && m.attention !== 'Healthy'
         ? `<span class="attention-pip ${m.attention}">${m.attention}</span>`
         : ''}
+      ${m.isAutoRunning
+        ? `<span class="auto-badge"><span class="auto-badge-dot"></span>auto</span>`
+        : ''}
     </div>
     ${total > 0 ? `
     <div class="slice-bar"><div class="slice-bar-fill" style="width:${pct}%"></div></div>
@@ -1871,7 +1925,7 @@ function openPanel(m) {
   }
   openInHtml += `
     <button class="terminal-btn" id="terminal-open-btn"
-      onclick='openTerminalForInstance(${JSON.stringify(inst.name)}, ${JSON.stringify(`${m.id} — ${m.title || inst.name}`)})'>
+      onclick='openTerminalForInstance(${JSON.stringify(inst.name)})'>
       ⌨ Terminal
     </button>`
   if (openInHtml) {
@@ -2012,8 +2066,9 @@ function openQuickPanel(qt) {
 }
 
 // ── Terminal ─────────────────────────────────────────────────────────────────
+// Single unified path: always opens a new browser tab via /terminal-page/:name
+// Session picker modal shown when multiple sessions exist and none is remembered.
 
-// localStorage key: gsd-cp-terminal-session:<instanceName> → sessionName
 function rememberedSession(instName) {
   try { return localStorage.getItem(`gsd-cp-terminal-session:${instName}`) } catch { return null }
 }
@@ -2021,48 +2076,51 @@ function rememberSession(instName, sessionName) {
   try { localStorage.setItem(`gsd-cp-terminal-session:${instName}`, sessionName) } catch {}
 }
 
-// State for repick
-let terminalState = null  // { instName, cardTitle, sessions, port }
+// openTerminalTab — used by both sidebar session rows AND card terminal button.
+// sessionName: tmux session name, 'shell' for local, or null to trigger picker.
+function openTerminalTab(instName, sessionName) {
+  rememberSession(instName, sessionName)
+  const url = sessionName === 'shell' || !sessionName
+    ? `/terminal-page/${encodeURIComponent(instName)}`
+    : `/terminal-page/${encodeURIComponent(instName)}?session=${encodeURIComponent(sessionName)}`
+  window.open(url, `term-${instName}-${sessionName ?? 'default'}`)
+}
 
-async function openTerminalForInstance(instName, cardTitle) {
-  // Fetch sessions + port from server
+// openTerminalForInstance — called by card "Terminal" button.
+// Fetches sessions, uses remembered session or shows picker if ambiguous.
+async function openTerminalForInstance(instName) {
   let data
   try {
     const res = await fetch(`/api/terminal/${encodeURIComponent(instName)}`)
     data = await res.json()
-  } catch (e) {
-    alert(`Terminal error: ${e.message}`); return
-  }
+  } catch (e) { alert(`Terminal error: ${e.message}`); return }
   if (data.error) { alert(`Terminal error: ${data.error}`); return }
 
-  const { sessions, defaultSession, port, type } = data
+  const { sessions, defaultSession, type } = data
 
-  if (type === 'local' && !port) { alert('Local instance terminals not yet supported.'); return }
-  if (!port) { alert('No ttyd port available — is ttyd running on the pod?'); return }
+  // Local → always shell
+  if (type === 'local') { openTerminalTab(instName, 'shell'); return }
 
-  terminalState = { instName, cardTitle: cardTitle || instName, sessions, port }
-
-  // If we have a remembered session and it still exists, use it directly
+  // Remembered session that still exists → use it
   const remembered = rememberedSession(instName)
   if (remembered && sessions.some(s => s.name === remembered)) {
-    connectToSession(port, remembered, cardTitle)
-    return
+    openTerminalTab(instName, remembered); return
   }
 
-  // Single session or local (no sessions) → connect immediately
-  if (sessions.length <= 1 || type === 'local') {
-    const session = sessions[0]?.name ?? defaultSession
-    connectToSession(port, type === 'local' ? 'shell' : session, cardTitle)
-    return
-  }
+  // Single session → go straight in
+  if (sessions.length === 1) { openTerminalTab(instName, sessions[0].name); return }
 
-  // Multiple → show picker in the slide-over panel
-  showSessionPicker(sessions, defaultSession, port, cardTitle)
+  // No sessions yet → use default
+  if (sessions.length === 0) { openTerminalTab(instName, defaultSession); return }
+
+  // Multiple sessions → show picker modal
+  showTerminalPicker(instName, sessions, defaultSession)
 }
 
-function showSessionPicker(sessions, defaultSession, port, cardTitle) {
-  const picker  = document.getElementById('session-picker')
-  const list    = document.getElementById('session-list')
+function showTerminalPicker(instName, sessions, defaultSession) {
+  // Reuse the session-picker that's already in the slide-over panel
+  const picker = document.getElementById('session-picker')
+  const list   = document.getElementById('session-list')
   list.innerHTML = ''
 
   for (const s of sessions) {
@@ -2072,63 +2130,16 @@ function showSessionPicker(sessions, defaultSession, port, cardTitle) {
     item.innerHTML = `
       <span class="session-dot ${s.attached ? 'attached' : 'detached'}"></span>
       <span class="session-name">${esc(s.name)}${isDefault ? ' <span style="color:var(--muted);font-weight:400;font-size:10px">(default)</span>' : ''}</span>
-      <span class="session-meta">${s.windows} window${s.windows !== 1 ? 's' : ''} · ${s.attached ? 'attached' : 'detached'}</span>
+      <span class="session-meta">${s.windows}w · ${s.attached ? 'attached' : 'detached'}</span>
     `
     item.addEventListener('click', () => {
       picker.classList.remove('visible')
-      connectToSession(port, s.name, cardTitle)
+      openTerminalTab(instName, s.name)
     })
     list.appendChild(item)
   }
 
   picker.classList.add('visible')
-}
-
-function repickSession() {
-  if (!terminalState) return
-  // Reset remembered session so picker shows
-  try { localStorage.removeItem(`gsd-cp-terminal-session:${terminalState.instName}`) } catch {}
-  // Hide overlay, reopen slide-over panel, show picker
-  document.getElementById('terminal-overlay').classList.remove('visible')
-  document.getElementById('panel-overlay').classList.add('visible')
-  document.getElementById('ttyd-frame').src = 'about:blank'
-  showSessionPicker(
-    terminalState.sessions,
-    rememberedSession(terminalState.instName) ?? terminalState.sessions[0]?.name,
-    terminalState.port,
-    terminalState.cardTitle
-  )
-}
-
-function connectToSession(port, sessionName, cardTitle) {
-  // Remember the choice (only meaningful for tmux sessions, not plain shells)
-  if (terminalState && sessionName !== 'shell') rememberSession(terminalState.instName, sessionName)
-
-  document.getElementById('panel-overlay').classList.remove('visible')
-  document.getElementById('session-picker').classList.remove('visible')
-
-  document.getElementById('terminal-overlay-title').textContent = cardTitle || terminalState?.instName || '—'
-  document.getElementById('terminal-overlay-session').textContent =
-    sessionName === 'shell' ? 'shell' : sessionName
-
-  // For tmux sessions pass ?arg=<session>; for plain shell just load the root URL
-  const url = sessionName === 'shell'
-    ? `http://localhost:${port}/`
-    : `http://localhost:${port}/?arg=${encodeURIComponent(sessionName)}`
-
-  document.getElementById('ttyd-frame').src = url
-  document.getElementById('terminal-overlay').classList.add('visible')
-}
-
-function closeTerminal() {
-  document.getElementById('terminal-overlay').classList.remove('visible')
-  document.getElementById('session-picker').classList.remove('visible')
-  document.getElementById('ttyd-frame').src = 'about:blank'
-  terminalState = null
-  // Re-open the slide-over if there's a selected card
-  if (selectedCard) {
-    document.getElementById('panel-overlay').classList.add('visible')
-  }
 }
 
 // ── Util ────────────────────────────────────────────────────────────────────

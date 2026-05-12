@@ -90,17 +90,18 @@ function derivePhase(milestone, slices, tasks, recentJournalEvents, pausedSessio
  * Derive the attention state for one milestone.
  * Returns { attention, attentionDetail }
  */
-function deriveAttention(milestone, { pausedSession, stuckState, recentNotifications, lastError }) {
+function deriveAttention(milestone, { pausedSession, stuckState, recentNotifications, lastError, hasActiveSession }) {
   const mid      = milestone.id
   const isPaused = pausedSession && pausedSession.milestoneId === mid
 
   if (isPaused) {
-    // ── Step-mode: always check this first ──────────────────────────────────
-    // stepMode = agent paused itself waiting for user to type or run /gsd next.
-    // This beats any error — the error may be what caused the pause (transient),
-    // but the actionable state is "waiting for you", not "broken".
+    // ── Step-mode ────────────────────────────────────────────────────────────
     if (pausedSession.stepMode) {
-      // Find the most recent step-mode pause notification for the detail text
+      // If there's an active interactive session, the user is working — not stuck
+      if (hasActiveSession) {
+        return { attention: 'Healthy', attentionDetail: null }
+      }
+
       const stepNotif = [...(recentNotifications || [])]
         .reverse()
         .find(n => {
@@ -111,15 +112,11 @@ function deriveAttention(milestone, { pausedSession, stuckState, recentNotificat
       const detail = stepNotif?.message
         ?? `Step-mode paused at ${pausedSession.unitId}. Type to interact or /gsd next to resume.`
 
-      // If there was also a transient error, surface it but keep attention=QuestionPending
       const errorSuffix = (lastError?.isTransient && lastError.unitId?.startsWith(mid + '/'))
         ? `\n\nLast error (transient): ${lastError.message}`
         : ''
 
-      return {
-        attention:       'QuestionPending',
-        attentionDetail: detail + errorSuffix
-      }
+      return { attention: 'QuestionPending', attentionDetail: detail + errorSuffix }
     }
 
     // ── Non-step-mode: real errors ───────────────────────────────────────────
@@ -211,14 +208,16 @@ export function deriveMilestone(milestone, {
   stuckState = null,
   recentNotifications = [],
   recentJournalEvents = [],
-  lastError = null
+  lastError = null,
+  hasActiveSession = false
 } = {}) {
   const phase = derivePhase(milestone, slices, tasks, recentJournalEvents, pausedSession)
   const { attention, attentionDetail } = deriveAttention(milestone, {
     pausedSession,
     stuckState,
     recentNotifications,
-    lastError
+    lastError,
+    hasActiveSession
   })
 
   if (phase === 'Unknown') {
@@ -254,7 +253,8 @@ export function deriveInstance(rawState) {
     stuckState,
     recentNotifications = [],
     recentJournalEvents = [],
-    lastError = null
+    lastError = null,
+    hasActiveSession = false
   } = rawState
 
   const enrichedMilestones = milestones.map(milestone => {
@@ -268,10 +268,15 @@ export function deriveInstance(rawState) {
       stuckState,
       recentNotifications,
       recentJournalEvents,
-      lastError
+      lastError,
+      hasActiveSession
     })
 
-    return { ...milestone, ...derived }
+    // Badge: auto-mode is actively running a unit for this milestone
+    const isAutoRunning = rawState.autoModeRunning === true &&
+      (rawState.autoModeUnit ?? '').startsWith(milestone.id + '/')
+
+    return { ...milestone, ...derived, isAutoRunning }
   })
 
   return { ...rawState, milestones: enrichedMilestones }
