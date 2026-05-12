@@ -27,6 +27,11 @@
       --active-col:  #1e2535;
 
       --header-h:    52px;
+
+      --vibe-backlog:      #7c3aed;
+      --vibe-in-progress:  #0ea5e9;
+      --vibe-review:       #f59e0b;
+      --vibe-done:         #22c55e;
     }
 
     body {
@@ -577,6 +582,140 @@
     .card:hover {
       border-color: var(--accent);
       transform: translateY(-1px);
+    }
+
+    .vibe-card {
+      background: linear-gradient(180deg, rgba(124,58,237,0.14), rgba(26,29,39,0.96));
+      border: 1px dashed rgba(167,139,250,0.55);
+      border-radius: 8px;
+      padding: 11px 12px;
+      position: relative;
+      transition: border-color 0.15s, transform 0.1s, opacity 0.15s;
+      cursor: grab;
+    }
+
+    .vibe-card:hover {
+      border-color: #c4b5fd;
+      transform: translateY(-1px);
+    }
+
+    .vibe-card.dragging {
+      opacity: 0.5;
+      cursor: grabbing;
+    }
+
+    .vibe-card.saving {
+      border-style: solid;
+      box-shadow: 0 0 0 1px rgba(196,181,253,0.45);
+    }
+
+    .vibe-card::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 4px; bottom: 4px;
+      width: 3px;
+      border-radius: 3px 0 0 3px;
+      background: var(--vibe-lane-color, var(--vibe-backlog));
+    }
+
+    .vibe-card-top {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .vibe-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #ddd6fe;
+      background: rgba(124,58,237,0.18);
+      border: 1px solid rgba(167,139,250,0.32);
+      border-radius: 4px;
+      padding: 1px 6px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .vibe-title-wrap {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .vibe-card-title {
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.4;
+      color: var(--text);
+    }
+
+    .vibe-card-description {
+      font-size: 11px;
+      line-height: 1.5;
+      color: #cbd5e1;
+      margin-bottom: 8px;
+      white-space: pre-wrap;
+    }
+
+    .vibe-card-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .vibe-chip {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 2px 7px;
+      font-size: 10px;
+      font-weight: 500;
+      border: 1px solid rgba(148,163,184,0.22);
+      background: rgba(15,17,23,0.35);
+      color: #cbd5e1;
+    }
+
+    .vibe-chip.lane {
+      color: #ddd6fe;
+      border-color: rgba(167,139,250,0.35);
+    }
+
+    .vibe-chip.priority-high {
+      color: #fecaca;
+      border-color: rgba(248,113,113,0.35);
+    }
+
+    .vibe-chip.priority-medium {
+      color: #fde68a;
+      border-color: rgba(245,158,11,0.35);
+    }
+
+    .vibe-chip.priority-low {
+      color: #bfdbfe;
+      border-color: rgba(96,165,250,0.35);
+    }
+
+    .vibe-error-banner {
+      background: #2a0a0a;
+      border: 1px solid rgba(239,68,68,0.32);
+      color: #fca5a5;
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 11px;
+      margin-bottom: 8px;
+    }
+
+    .phase-column.drop-target .col-cards {
+      background: rgba(99,102,241,0.08);
     }
 
     .card.done {
@@ -1290,10 +1429,23 @@
 
 <script>
 const PHASES = ['Discussing','Researching','Planning','Executing','Validating','Done']
+const VIBE_LANES = [
+  { id: 'backlog', phase: 'Discussing', label: 'Backlog' },
+  { id: 'in-progress', phase: 'Executing', label: 'In Progress' },
+  { id: 'review', phase: 'Validating', label: 'Review' },
+  { id: 'done', phase: 'Done', label: 'Done' }
+]
+const VIBE_LANE_PHASE = new Map(VIBE_LANES.map(lane => [lane.id, lane.phase]))
 const API    = 'http://localhost:3001/api/instances'
 const POLL   = 5000
 
 let currentData = null
+let vibeCards = []
+let vibeCardsError = null
+let vibeCardsLoading = false
+let vibeCardSaveError = null
+let vibeCardDragId = null
+let vibeCardSavingIds = new Set()
 let selectedCard = null
 let currentTab   = 'board'
 
@@ -1657,12 +1809,92 @@ function applyFilter() {
   if (currentData) render(currentData)
 }
 
+function escapeAttr(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+}
+
+function getVibeLane(card) {
+  return typeof card?.lane === 'string' && VIBE_LANE_PHASE.has(card.lane) ? card.lane : 'backlog'
+}
+
+function getVibeCardsForPhase(phase) {
+  return vibeCards.filter(card => VIBE_LANE_PHASE.get(getVibeLane(card)) === phase)
+}
+
+function vibeLaneLabel(laneId) {
+  return VIBE_LANES.find(lane => lane.id === laneId)?.label ?? laneId
+}
+
+function vibeLaneColor(laneId) {
+  switch (laneId) {
+    case 'in-progress': return 'var(--vibe-in-progress)'
+    case 'review': return 'var(--vibe-review)'
+    case 'done': return 'var(--vibe-done)'
+    default: return 'var(--vibe-backlog)'
+  }
+}
+
+async function fetchVibeCards() {
+  vibeCardsLoading = true
+  vibeCardsError = null
+  try {
+    const res = await fetch('/api/vibe-cards')
+    const json = await res.json()
+    if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`)
+    vibeCards = Array.isArray(json?.cards) ? json.cards : []
+    vibeCardSaveError = null
+  } catch (error) {
+    vibeCardsError = error.message || 'Failed to load Vibe Cards'
+    console.error('[vibe-cards] fetch failed', error)
+  } finally {
+    vibeCardsLoading = false
+  }
+}
+
+async function moveVibeCard(cardId, lane) {
+  const existing = vibeCards.find(card => card.id === cardId)
+  if (!existing) return
+
+  const previousLane = getVibeLane(existing)
+  if (previousLane === lane) return
+
+  vibeCardSaveError = null
+  vibeCardSavingIds = new Set([...vibeCardSavingIds, cardId])
+  vibeCards = vibeCards.map(card => card.id === cardId ? { ...card, lane } : card)
+  if (currentData) render(currentData)
+
+  try {
+    const res = await fetch(`/api/vibe-cards/${encodeURIComponent(cardId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lane })
+    })
+    const json = await res.json()
+    if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`)
+    vibeCards = vibeCards.map(card => card.id === cardId ? json.card : card)
+  } catch (error) {
+    console.error(`[vibe-cards] save failed id=${cardId} lane=${lane}`, error)
+    vibeCardSaveError = `Failed to move Vibe Card: ${error.message || 'unknown error'}`
+    await fetchVibeCards()
+  } finally {
+    const nextSavingIds = new Set(vibeCardSavingIds)
+    nextSavingIds.delete(cardId)
+    vibeCardSavingIds = nextSavingIds
+    if (currentData) render(currentData)
+  }
+}
+
 // ── Fetch + render loop ──────────────────────────────────────────────────────
 
 async function poll() {
   try {
-    const res  = await fetch(API)
-    const json = await res.json()
+    const [instancesRes] = await Promise.all([
+      fetch(API),
+      fetchVibeCards()
+    ])
+    const json = await instancesRes.json()
     currentData = json
     render(json)
     document.getElementById('status-dot').className = 'status-dot'
@@ -1671,6 +1903,7 @@ async function poll() {
   } catch(e) {
     document.getElementById('status-dot').className = 'status-dot stale'
     document.getElementById('last-updated').textContent = 'Offline'
+    console.error('[board] poll failed', e)
   }
 }
 
@@ -1778,6 +2011,7 @@ function renderBoard(milestones, instances, quickTasks) {
 
   for (const phase of PHASES) {
     let cards = milestones.filter(m => m.phase === phase)
+    const vibePhaseCards = getVibeCardsForPhase(phase)
 
     // Apply Done window filter
     if (phase === 'Done') {
@@ -1789,10 +2023,11 @@ function renderBoard(milestones, instances, quickTasks) {
       ? quickTasks.filter(qt => isWithinDoneWindow(qt.date))
       : []
 
-    const totalCount = cards.length + phaseQuickTasks.length
+    const totalCount = cards.length + phaseQuickTasks.length + vibePhaseCards.length
 
     const col = document.createElement('div')
     col.className = 'phase-column'
+    col.dataset.phase = phase
     col.innerHTML = `
       <div class="col-header">
         <span class="col-title">${phase}</span>
@@ -1804,6 +2039,41 @@ function renderBoard(milestones, instances, quickTasks) {
 
     const colEl = col.querySelector('.col-cards')
 
+    if (vibeCardsError) {
+      const banner = document.createElement('div')
+      banner.className = 'vibe-error-banner'
+      banner.dataset.vibeError = 'true'
+      banner.textContent = `Vibe Cards unavailable: ${vibeCardsError}`
+      colEl.appendChild(banner)
+    } else if (phase === 'Discussing' && vibeCardsLoading && vibeCards.length === 0) {
+      const banner = document.createElement('div')
+      banner.className = 'offline-card'
+      banner.textContent = 'Loading Vibe Cards…'
+      colEl.appendChild(banner)
+    }
+
+    const targetLane = VIBE_LANES.find(lane => lane.phase === phase)?.id ?? null
+    if (targetLane) {
+      col.addEventListener('dragover', event => {
+        if (!vibeCardDragId) return
+        event.preventDefault()
+        col.classList.add('drop-target')
+      })
+      col.addEventListener('dragleave', event => {
+        if (!col.contains(event.relatedTarget)) {
+          col.classList.remove('drop-target')
+        }
+      })
+      col.addEventListener('drop', async event => {
+        if (!vibeCardDragId) return
+        event.preventDefault()
+        col.classList.remove('drop-target')
+        const draggedId = vibeCardDragId
+        vibeCardDragId = null
+        await moveVibeCard(draggedId, targetLane)
+      })
+    }
+
     // Offline instance banners
     for (const inst of instances) {
       if (phase === 'Executing' && inst.error) {
@@ -1812,6 +2082,10 @@ function renderBoard(milestones, instances, quickTasks) {
         banner.textContent = `${inst.name}: offline`
         colEl.appendChild(banner)
       }
+    }
+
+    for (const vibeCard of vibePhaseCards) {
+      colEl.appendChild(makeVibeCard(vibeCard))
     }
 
     for (const m of cards) {
@@ -1834,6 +2108,55 @@ function renderBoard(milestones, instances, quickTasks) {
       }
     }
   }
+}
+
+function makeVibeCard(cardData) {
+  const lane = getVibeLane(cardData)
+  const laneLabel = vibeLaneLabel(lane)
+  const priority = cardData.priority || 'none'
+  const isSaving = vibeCardSavingIds.has(cardData.id)
+
+  const card = document.createElement('div')
+  card.className = `vibe-card${vibeCardDragId === cardData.id ? ' dragging' : ''}${isSaving ? ' saving' : ''}`
+  card.draggable = true
+  card.dataset.vibeCard = 'true'
+  card.dataset.vibeCardId = cardData.id
+  card.dataset.vibeLane = lane
+  card.style.setProperty('--vibe-lane-color', vibeLaneColor(lane))
+  card.innerHTML = `
+    <div class="vibe-card-top">
+      <span class="vibe-badge">Vibe Card</span>
+      <div class="vibe-title-wrap">
+        <span class="vibe-card-title">${esc(cardData.title || '(untitled)')}</span>
+        <span class="card-id">${esc(cardData.id)}</span>
+      </div>
+    </div>
+    ${cardData.description ? `<div class="vibe-card-description">${esc(cardData.description)}</div>` : ''}
+    <div class="vibe-card-meta">
+      <span class="vibe-chip lane" data-vibe-lane-chip="true">${esc(laneLabel)}</span>
+      ${cardData.status ? `<span class="vibe-chip">${esc(cardData.status)}</span>` : ''}
+      ${priority && priority !== 'none' ? `<span class="vibe-chip priority-${escapeAttr(priority)}">${esc(priority)}</span>` : ''}
+      ${(cardData.tags || []).slice(0, 2).map(tag => `<span class="vibe-chip">#${esc(tag)}</span>`).join('')}
+      ${isSaving ? `<span class="vibe-chip">Saving…</span>` : ''}
+    </div>
+  `
+
+  card.addEventListener('dragstart', event => {
+    vibeCardDragId = cardData.id
+    event.dataTransfer?.setData('text/plain', cardData.id)
+    event.dataTransfer.effectAllowed = 'move'
+    requestAnimationFrame(() => {
+      card.classList.add('dragging')
+    })
+  })
+
+  card.addEventListener('dragend', () => {
+    vibeCardDragId = null
+    document.querySelectorAll('.phase-column.drop-target').forEach(el => el.classList.remove('drop-target'))
+    card.classList.remove('dragging')
+  })
+
+  return card
 }
 
 function makeCard(m) {

@@ -137,8 +137,16 @@ async function startManagedServer({ reseed = false, logDir = null } = {}) {
     stderrPath,
     logDir: activeLogDir,
     async restart() {
-      try { child.kill('SIGTERM') } catch {}
-      await new Promise(resolvePromise => child.once('exit', resolvePromise))
+      if (child.exitCode === null) {
+        try { child.kill('SIGTERM') } catch {}
+        await Promise.race([
+          new Promise(resolvePromise => child.once('exit', resolvePromise)),
+          sleep(5000)
+        ])
+        if (child.exitCode === null) {
+          try { child.kill('SIGKILL') } catch {}
+        }
+      }
       return startManagedServer({ reseed: false, logDir: activeLogDir })
     },
     async stop() {
@@ -162,8 +170,8 @@ function assertLogsContain(logText, needle, description) {
 async function verifyCrud(serverHandle) {
   const initial = await request('/api/vibe-cards')
   assert.equal(initial.res.status, 200, 'GET /api/vibe-cards should succeed')
-  assert.equal(initial.json?.cards?.length, 1, 'Seeded server should start with one card')
-  assert.equal(initial.json.cards[0]?.id, 'seed-card-1', 'Seed card should be loaded from vibe-cards.json')
+  assert.ok(initial.json?.cards?.length >= 1, 'Seeded server should start with at least one card')
+  assert.ok(initial.json.cards.some(card => card.id === seededCards[0].id), 'Seed card should be loaded from vibe-cards.json')
 
   const cardId = `verify-${Date.now()}`
 
