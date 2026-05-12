@@ -1,42 +1,171 @@
 #!/usr/bin/env node
 
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, resolve } from 'node:path'
 import process from 'node:process'
+import { fileURLToPath } from 'node:url'
+import { spawn } from 'node:child_process'
 
-const ROOT = resolve(process.cwd(), 'dashboard')
-const FILE = resolve(ROOT, 'vibe-cards.json')
-const BASE_URL = process.env.VIBE_CARDS_API_URL ?? 'http://localhost:3001'
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const ROOT = resolve(__dirname, '..')
+const SERVER_ENTRY = resolve(ROOT, 'server.js')
+const FIXTURE_FILE = resolve(ROOT, 'vibe-cards.json')
 const phaseArg = process.argv.find(arg => arg.startsWith('--phase='))
 const phase = phaseArg ? phaseArg.split('=')[1] : 'crud'
-
-async function request(path, init) {
-  const res = await fetch(`${BASE_URL}${path}`, init)
-  const text = await res.text()
-  let json = null
-  if (text) {
-    try { json = JSON.parse(text) }
-    catch (error) {
-      throw new Error(`Expected JSON from ${path}, got: ${text.slice(0, 200)}`)
-    }
+const requestedBaseUrl = process.env.VIBE_CARDS_API_URL ?? null
+const HOST = process.env.VIBE_CARDS_API_HOST ?? '127.0.0.1'
+const PORT = parseInt(process.env.VIBE_CARDS_API_PORT ?? '3111', 10)
+const BASE_URL = requestedBaseUrl ?? `http://${HOST}:${PORT}`
+const shouldManageServer = !requestedBaseUrl
+const seededCards = [
+  {
+    id: 'seed-card-1',
+    title: 'Seed Card',
+    description: 'Baseline card for verification',
+    lane: 'backlog',
+    status: 'open',
+    priority: 'medium',
+    tags: ['seed'],
+    metadata: { source: 'verify-script' },
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z'
   }
-  return { res, json }
+]
+
+function sleep(ms) {
+  return new Promise(resolvePromise => setTimeout(resolvePromise, ms))
+}
+
+function readPersistedPayload() {
+  const parsed = JSON.parse(readFileSync(FIXTURE_FILE, 'utf8'))
+  assert.ok(parsed && typeof parsed === 'object' && !Array.isArray(parsed), 'vibe-cards.json should be an object payload')
+  assert.ok(Array.isArray(parsed.cards), 'vibe-cards.json should contain a cards array')
+  return parsed
 }
 
 function readPersistedCards() {
-  const parsed = JSON.parse(readFileSync(FILE, 'utf8'))
-  assert.ok(parsed && typeof parsed === 'object' && !Array.isArray(parsed), 'vibe-cards.json should be an object payload')
-  assert.ok(Array.isArray(parsed.cards), 'vibe-cards.json should contain a cards array')
-  return parsed.cards
+  return readPersistedPayload().cards
 }
 
-async function verifyCrud() {
-  const cardId = `verify-${Date.now()}`
+async function request(path, init, attempt = 0) {
+  try {
+    const res = await fetch(`${BASE_URL}${path}`, init)
+    const text = await res.text()
+    let json = null
+    if (text) {
+      try {
+        json = JSON.parse(text)
+      } catch {
+        throw new Error(`Expected JSON from ${path}, got: ${text.slice(0, 200)}`)
+      }
+    }
+    return { res, json }
+  } catch (error) {
+    const code = error?.cause?.code
+    if (attempt < 4 && (code === 'ECONNRESET' || code === 'ECONNREFUSED')) {
+      await sleep(150)
+      return request(path, init, attempt + 1)
+    }
+    throw error
+  }
+}
 
+function seedFixture() {
+  writeFileSync(FIXTURE_FILE, JSON.stringify({ cards: seededCards }, null, 2) + '\n')
+}
+
+async function waitForServer() {
+  const start = Date.now()
+  let lastError = null
+
+  while (Date.now() - start < 20000) {
+    try {
+      const response = await request('/api/vibe-cards')
+      if (response.res.status === 200) {
+        return response
+      }
+      lastError = new Error(`Unexpected status ${response.res.status}`)
+    } catch (error) {
+      lastError = error
+    }
+    await sleep(250)
+  }
+
+  throw new Error(`Timed out waiting for ${BASE_URL}/api/vibe-cards: ${lastError?.message ?? 'unknown error'}`)
+}
+
+async function startManagedServer({ reseed = false, logDir = null } = {}) {
+  if (reseed) {
+    seedFixture()
+  }
+
+  const activeLogDir = logDir ?? mkdtempSync(resolve(tmpdir(), 'verify-vibe-cards-'))
+  const stdoutPath = resolve(activeLogDir, 'server.stdout.log')
+  const stderrPath = resolve(activeLogDir, 'server.stderr.log')
+  if (!existsSync(stdoutPath)) writeFileSync(stdoutPath, '')
+  if (!existsSync(stderrPath)) writeFileSync(stderrPath, '')
+
+  const child = spawn(process.execPath, [SERVER_ENTRY], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      PORT: String(PORT),
+      REDIS_LOCAL_PORT: String(parseInt(process.env.REDIS_LOCAL_PORT ?? '6380', 10) + 101)
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  })
+
+  child.stdout.on('data', chunk => {
+    writeFileSync(stdoutPath, chunk, { flag: 'a' })
+  })
+  child.stderr.on('data', chunk => {
+    writeFileSync(stderrPath, chunk, { flag: 'a' })
+  })
+
+  try {
+    await waitForServer()
+  } catch (error) {
+    try { child.kill('SIGTERM') } catch {}
+    throw new Error(`${error.message}\nstdout:\n${readFileSync(stdoutPath, 'utf8')}\nstderr:\n${readFileSync(stderrPath, 'utf8')}`)
+  }
+
+  return {
+    child,
+    stdoutPath,
+    stderrPath,
+    logDir: activeLogDir,
+    async restart() {
+      try { child.kill('SIGTERM') } catch {}
+      await new Promise(resolvePromise => child.once('exit', resolvePromise))
+      return startManagedServer({ reseed: false, logDir: activeLogDir })
+    },
+    async stop() {
+      if (child.exitCode !== null) return
+      try { child.kill('SIGTERM') } catch {}
+      await Promise.race([
+        new Promise(resolvePromise => child.once('exit', resolvePromise)),
+        sleep(5000)
+      ])
+      if (child.exitCode === null) {
+        try { child.kill('SIGKILL') } catch {}
+      }
+    }
+  }
+}
+
+function assertLogsContain(logText, needle, description) {
+  assert.match(logText, needle, description)
+}
+
+async function verifyCrud(serverHandle) {
   const initial = await request('/api/vibe-cards')
   assert.equal(initial.res.status, 200, 'GET /api/vibe-cards should succeed')
-  assert.ok(Array.isArray(initial.json?.cards), 'GET should return a cards array')
+  assert.equal(initial.json?.cards?.length, 1, 'Seeded server should start with one card')
+  assert.equal(initial.json.cards[0]?.id, 'seed-card-1', 'Seed card should be loaded from vibe-cards.json')
+
+  const cardId = `verify-${Date.now()}`
 
   const badCreate = await request('/api/vibe-cards', {
     method: 'POST',
@@ -94,6 +223,12 @@ async function verifyCrud() {
   assert.equal(persistedUpdated?.title, 'Verification Card Updated', 'Updated card should persist title change')
   assert.equal(persistedUpdated?.lane, 'in-progress', 'Updated card should persist lane change')
 
+  const restartedServer = shouldManageServer ? await serverHandle.restart() : serverHandle
+  const afterRestart = await request('/api/vibe-cards')
+  assert.equal(afterRestart.res.status, 200, 'GET after restart should succeed')
+  assert.ok(afterRestart.json.cards.some(card => card.id === cardId), 'Created card should survive server restart')
+  assert.equal(afterRestart.json.cards.find(card => card.id === cardId)?.title, 'Verification Card Updated', 'Updated card should survive restart')
+
   const deleted = await request(`/api/vibe-cards/${cardId}`, { method: 'DELETE' })
   assert.equal(deleted.res.status, 200, 'Delete should return 200')
   assert.equal(deleted.json?.id, cardId, 'Delete should report removed id')
@@ -104,15 +239,43 @@ async function verifyCrud() {
   const finalList = await request('/api/vibe-cards')
   assert.equal(finalList.res.status, 200)
   assert.ok(!finalList.json.cards.some(card => card.id === cardId), 'Deleted card should be removed from API list')
+  assert.ok(finalList.json.cards.some(card => card.id === 'seed-card-1'), 'Seed card should remain after cleanup')
 
   persistedCards = readPersistedCards()
   assert.ok(!persistedCards.some(card => card.id === cardId), 'Deleted card should be removed from vibe-cards.json')
+  assert.ok(persistedCards.some(card => card.id === 'seed-card-1'), 'Fixture seed should remain on disk after cleanup')
 
-  console.log(`verify-vibe-cards-api: ${phase} ok`)
+  if (shouldManageServer) {
+    const stdout = readFileSync(restartedServer.stdoutPath, 'utf8')
+    const stderr = existsSync(restartedServer.stderrPath) ? readFileSync(restartedServer.stderrPath, 'utf8') : ''
+    assertLogsContain(stdout, /\[vibe-cards\] loaded \d+ card\(s\) from /, 'Startup load log should be emitted')
+    assertLogsContain(stdout, new RegExp(`\\[vibe-cards\\] action=create id=${cardId}`), 'Create action log should include the card id')
+    assertLogsContain(stdout, new RegExp(`\\[vibe-cards\\] action=update id=${cardId}`), 'Update action log should include the card id')
+    assertLogsContain(stdout, new RegExp(`\\[vibe-cards\\] action=delete id=${cardId}`), 'Delete action log should include the card id')
+    assert.ok(!/\[vibe-cards\].*failed/i.test(stderr), 'Server stderr should not contain Vibe Card failures during verification')
+  }
+
+  return restartedServer
 }
 
 if (phase !== 'crud') {
   throw new Error(`Unsupported phase '${phase}'`)
 }
 
-await verifyCrud()
+let managedServer = null
+const originalFixture = existsSync(FIXTURE_FILE) ? readFileSync(FIXTURE_FILE, 'utf8') : null
+
+try {
+  managedServer = shouldManageServer ? await startManagedServer({ reseed: true }) : null
+  managedServer = await verifyCrud(managedServer)
+  console.log(`verify-vibe-cards-api: ${phase} ok (${BASE_URL})`)
+} finally {
+  if (managedServer) {
+    await managedServer.stop()
+  }
+  if (originalFixture === null) {
+    rmSync(FIXTURE_FILE, { force: true })
+  } else {
+    writeFileSync(FIXTURE_FILE, originalFixture)
+  }
+}
