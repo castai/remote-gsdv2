@@ -32,7 +32,7 @@
       "title": "Celery / Cron Fixes to Complete migration",
       "description": null,
       "status": "open",
-      "lane": "executing",
+      "lane": "done",
       "priority": "medium",
       "tags": [],
       "metadata": {
@@ -44,7 +44,64 @@
       },
       "comments": [],
       "createdAt": "2026-05-12T19:45:31.788Z",
-      "updatedAt": "2026-05-12T20:00:53.465Z"
+      "updatedAt": "2026-05-12T20:02:25.856Z"
+    },
+    {
+      "id": "additional-fixes-for-celery-openclaw-jobs",
+      "title": "additional fixes for celery + openclaw jobs",
+      "description": null,
+      "status": "open",
+      "lane": "done",
+      "priority": "medium",
+      "tags": [],
+      "metadata": {
+        "color": "purple",
+        "instanceName": "salesanalyzer",
+        "sessionName": "M027AutoMode",
+        "jiraUrl": null,
+        "linkedQuickTaskId": 56
+      },
+      "comments": [],
+      "createdAt": "2026-05-12T20:23:12.605Z",
+      "updatedAt": "2026-05-12T20:31:21.267Z"
+    },
+    {
+      "id": "troubleshoot-intent-signal-delivery-failure",
+      "title": "troubleshoot intent signal delivery failure",
+      "description": null,
+      "status": "open",
+      "lane": "done",
+      "priority": "medium",
+      "tags": [],
+      "metadata": {
+        "color": "green",
+        "instanceName": "salesanalyzer",
+        "sessionName": "M027AutoMode",
+        "jiraUrl": null,
+        "linkedQuickTaskId": 57
+      },
+      "comments": [],
+      "createdAt": "2026-05-12T20:50:41.913Z",
+      "updatedAt": "2026-05-12T20:58:36.583Z"
+    },
+    {
+      "id": "implement-copy-from-pod-image-support",
+      "title": "implement copy from pod + image support",
+      "description": null,
+      "status": "open",
+      "lane": "planning",
+      "priority": "medium",
+      "tags": [],
+      "metadata": {
+        "color": "blue",
+        "instanceName": "remote_gsdv2",
+        "sessionName": "gsd",
+        "jiraUrl": null,
+        "linkedQuickTaskId": null
+      },
+      "comments": [],
+      "createdAt": "2026-05-13T14:12:25.729Z",
+      "updatedAt": "2026-05-13T14:14:39.934Z"
     }
   ]
 }

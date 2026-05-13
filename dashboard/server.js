@@ -611,6 +611,36 @@ app.get('/api/pick-folder', (req, res) => {
   }
 })
 
+/**
+ * POST /api/clipboard-image
+ * Accepts raw image bytes (Content-Type: image/png|jpeg|gif|webp) and writes them
+ * to a tmp file. Returns { path } with the local filesystem path the user can
+ * reference. The terminal-page uses this on paste of an image-bearing clipboard.
+ */
+app.post('/api/clipboard-image', express.raw({ type: 'image/*', limit: '25mb' }), (req, res) => {
+  try {
+    const ct = (req.headers['content-type'] || '').toLowerCase()
+    const ext = ct.includes('png') ? 'png'
+              : ct.includes('jpeg') || ct.includes('jpg') ? 'jpg'
+              : ct.includes('gif') ? 'gif'
+              : ct.includes('webp') ? 'webp'
+              : 'bin'
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      return res.status(400).json({ error: 'empty image body' })
+    }
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19)
+    const rand = Math.random().toString(36).slice(2, 7)
+    const filename = `clipboard-${stamp}-${rand}.${ext}`
+    const filepath = `/tmp/${filename}`
+    writeFileSync(filepath, req.body)
+    console.log(`[clipboard-image] saved ${filepath} (${req.body.length} bytes)`)
+    res.json({ path: filepath, bytes: req.body.length })
+  } catch (err) {
+    console.error('[clipboard-image] save failed:', err)
+    res.status(500).json({ error: err.message || 'failed to save image' })
+  }
+})
+
 app.get('/api/terminal-prefs', (req, res) => res.json(terminalPrefs))
 
 app.post('/api/terminal-prefs', (req, res) => {
