@@ -613,10 +613,14 @@ app.get('/api/pick-folder', (req, res) => {
 })
 
 /**
- * POST /api/clipboard-image
- * Accepts raw image bytes (Content-Type: image/png|jpeg|gif|webp) and writes them
- * to a tmp file. Returns { path } with the local filesystem path the user can
- * reference. The terminal-page uses this on paste of an image-bearing clipboard.
+ * POST /api/clipboard-image?instance=<name>
+ * Accepts raw image bytes (Content-Type: image/png|jpeg|gif|webp) and writes
+ * them to a tmp file. If the named instance is a pod, the file is also copied
+ * into the pod via `kubectl cp` and the returned path is the pod-side path so
+ * the agent running there can read it.
+ *
+ * Returns { path } with the filesystem path appropriate for the caller's
+ * instance.
  */
 app.post('/api/clipboard-image', express.raw({ type: 'image/*', limit: '25mb' }), (req, res) => {
   try {
@@ -632,10 +636,30 @@ app.post('/api/clipboard-image', express.raw({ type: 'image/*', limit: '25mb' })
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19)
     const rand = Math.random().toString(36).slice(2, 7)
     const filename = `clipboard-${stamp}-${rand}.${ext}`
-    const filepath = `/tmp/${filename}`
-    writeFileSync(filepath, req.body)
-    console.log(`[clipboard-image] saved ${filepath} (${req.body.length} bytes)`)
-    res.json({ path: filepath, bytes: req.body.length })
+    const localPath = `/tmp/${filename}`
+    writeFileSync(localPath, req.body)
+    console.log(`[clipboard-image] saved ${localPath} (${req.body.length} bytes)`)
+
+    const instanceName = req.query.instance
+    const cfg = instanceName ? instanceConfigs.find(i => i.name === instanceName) : null
+
+    // Pod instance — copy the file into the pod at /tmp/<same-filename>
+    if (cfg?.pod) {
+      const ns = cfg.namespace ?? 'lk-gsd'
+      const ctr = cfg.container ?? 'gsd'
+      const podPath = `/tmp/${filename}`
+      try {
+        execFileSync(KUBECTL, ['cp', localPath, `${ns}/${cfg.pod}:${podPath}`, '-c', ctr],
+          { encoding: 'utf8', timeout: 15000 })
+        console.log(`[clipboard-image] copied to pod ${cfg.pod}:${podPath}`)
+        return res.json({ path: podPath, bytes: req.body.length, instance: cfg.name, pod: true })
+      } catch (err) {
+        console.warn(`[clipboard-image] kubectl cp failed for ${cfg.name}: ${err.message}`)
+        // Fall through to return the local path — better than nothing
+      }
+    }
+
+    res.json({ path: localPath, bytes: req.body.length, instance: cfg?.name ?? null, pod: false })
   } catch (err) {
     console.error('[clipboard-image] save failed:', err)
     res.status(500).json({ error: err.message || 'failed to save image' })
@@ -1046,27 +1070,51 @@ app.get('/terminal-page/:name', (req, res) => {
     }
 
     function sendPaste(text){
+      // Use the iframe's xterm.term.paste() — that writes through the iframe's
+      // existing WS connection, so the data reaches the actual terminal session.
+      // (A separate WS would land in a phantom ttyd session that nobody renders.)
+      const term = document.getElementById('ttyd-frame')?.contentWindow?.term
+      if(term && typeof term.paste === 'function'){
+        try { term.paste(text); return } catch(e){ console.warn('[paste] term.paste failed:', e.message) }
+      }
+      // Fallback: direct WS to ttyd (legacy path — kept in case iframe isn't loaded yet)
       if(!ttydWs||ttydWs.readyState!==WebSocket.OPEN){
         if(ttydPort) connectPasteWs(ttydPort)
         setTimeout(()=>sendPaste(text),300)
         return
       }
-      // Wrap in bracketed paste sequences so tmux/shell handles multi-line correctly
       const wrapped='\x1b[200~'+text+'\x1b[201~'
       const encoded=new TextEncoder().encode(wrapped)
       const msg=new Uint8Array(encoded.length+1)
-      msg[0]=1  // type=input
+      msg[0]=1
       msg.set(encoded,1)
       ttydWs.send(msg)
     }
 
     async function pasteFromClipboard(){
+      // First try the rich Clipboard API for images
+      if(navigator.clipboard?.read){
+        try{
+          const items = await navigator.clipboard.read()
+          for(const item of items){
+            const imgType = item.types.find(t => t.startsWith('image/'))
+            if(imgType){
+              const blob = await item.getType(imgType)
+              await handleImagePaste(blob)
+              return
+            }
+          }
+        }catch(e){
+          // Fall through to text path — happens when nothing in clipboard or permission not yet granted
+          console.debug('[paste] clipboard.read failed:', e.message)
+        }
+      }
+      // Text path
       try{
         const text=await navigator.clipboard.readText()
         if(text) sendPaste(text)
       }catch(e){
         console.warn('[paste] clipboard read failed:',e.message)
-        // Fallback: focus iframe and let user Cmd+V natively
         document.getElementById('ttyd-frame').focus()
         alert('Clipboard access denied. Click inside the terminal and use Cmd+V.')
       }
@@ -1144,10 +1192,33 @@ app.get('/terminal-page/:name', (req, res) => {
           // Shift+arrow selections — copy when key released
           if(e.shiftKey) setTimeout(autoCopyIfNew, 30)
         })
+        // Intercept paste inside the iframe so image pastes work even when focus is in xterm
+        doc.addEventListener('paste', handleIframePaste, true)
+        // Also intercept Cmd+V keydown inside the iframe — some browsers fire paste only on input elements
+        doc.addEventListener('keydown', e => {
+          if((e.metaKey || e.ctrlKey) && (e.key === 'v' || e.key === 'V')){
+            // Don't preventDefault yet — we don't know if it's an image until we read the clipboard
+            // Trigger pasteFromClipboard which handles both images and text
+            e.preventDefault()
+            pasteFromClipboard()
+          }
+        }, true)
       }catch{
         // Cross-origin until the iframe URL becomes same-origin (localhost:ttydPort)
         setTimeout(wireIframeSelectionCapture, 500)
       }
+    }
+
+    async function handleIframePaste(e){
+      const items = Array.from(e.clipboardData?.items ?? [])
+      const imageItem = items.find(it => it.type?.startsWith('image/'))
+      if(imageItem){
+        e.preventDefault()
+        e.stopPropagation()
+        const blob = imageItem.getAsFile()
+        if(blob) await handleImagePaste(blob)
+      }
+      // For text, let xterm's default paste handler work
     }
     document.getElementById('ttyd-frame').addEventListener('load', () => {
       setTimeout(wireIframeSelectionCapture, 100)
@@ -1162,7 +1233,8 @@ app.get('/terminal-page/:name', (req, res) => {
     async function handleImagePaste(blob){
       try{
         flashStatus('Uploading image…')
-        const res = await fetch('/api/clipboard-image', {
+        const url = '/api/clipboard-image?instance=' + encodeURIComponent(INST)
+        const res = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': blob.type || 'image/png' },
           body: blob
@@ -1170,7 +1242,7 @@ app.get('/terminal-page/:name', (req, res) => {
         const data = await res.json()
         if(!res.ok) throw new Error(data?.error || ('HTTP ' + res.status))
         sendPaste('[image: ' + data.path + ']')
-        flashStatus('Image pasted: ' + data.path)
+        flashStatus((data.pod ? 'Pod image: ' : 'Image: ') + data.path)
       }catch(e){
         console.warn('[image-paste] failed:', e.message)
         alert('Failed to save pasted image: ' + e.message)
