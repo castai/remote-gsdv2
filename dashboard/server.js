@@ -903,6 +903,8 @@ app.get('/terminal-page/:name', (req, res) => {
     #bar-title{font-family:-apple-system,sans-serif;font-size:12px;color:#e2e8f0;font-weight:500}
     #bar-session{font-family:'SF Mono','Fira Code',monospace;font-size:11px;
       color:#22c55e;background:#0a2a1e;border-radius:4px;padding:1px 7px}
+    #bar-hint{font-family:-apple-system,sans-serif;font-size:10px;color:#94a3b8;
+      background:#22263a;border-radius:4px;padding:2px 7px;letter-spacing:0.02em}
     #bar-spacer{flex:1}
     .bar-btn{background:none;border:1px solid #2e3349;border-radius:4px;
       color:#64748b;font-size:11px;padding:3px 8px;cursor:pointer;transition:border-color .15s,color .15s;white-space:nowrap}
@@ -932,8 +934,9 @@ app.get('/terminal-page/:name', (req, res) => {
     <span id="bar-dot"></span>
     <span id="bar-title">${cfg.name}</span>
     <span id="bar-session">${sessionName}</span>
+    <span id="bar-hint" title="tmux mouse mode is on — hold Option/Alt while dragging to select text">⌥-drag to select</span>
     <span id="bar-spacer"></span>
-    <button class="bar-btn" id="copy-btn" onclick="copyTerminalSelection()" title="Copy selection (Cmd+C)">⌘C Copy</button>
+    <button class="bar-btn" id="copy-btn" onclick="copyTerminalSelection()" title="Copy selection (⌥-drag to select, then auto-copies; or click here)">⌘C Copy</button>
     <button class="bar-btn" id="paste-btn" onclick="pasteFromClipboard()" title="Paste (Cmd+V)">⌘V Paste</button>
     <button class="bar-btn" id="settings-btn" onclick="toggleSettings(event)">⚙</button>
     <div id="settings-panel">
