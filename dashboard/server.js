@@ -28,7 +28,8 @@ import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { execFileSync, spawn } from 'child_process'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
-import { createServer } from 'http'
+import { createServer, request as httpRequest } from 'http'
+import { connect as netConnect } from 'net'
 import Redis from 'ioredis'
 import { readInstance } from './reader.js'
 import { deriveInstance } from './derive.js'
@@ -612,10 +613,14 @@ app.get('/api/pick-folder', (req, res) => {
 })
 
 /**
- * POST /api/clipboard-image
- * Accepts raw image bytes (Content-Type: image/png|jpeg|gif|webp) and writes them
- * to a tmp file. Returns { path } with the local filesystem path the user can
- * reference. The terminal-page uses this on paste of an image-bearing clipboard.
+ * POST /api/clipboard-image?instance=<name>
+ * Accepts raw image bytes (Content-Type: image/png|jpeg|gif|webp) and writes
+ * them to a tmp file. If the named instance is a pod, the file is also copied
+ * into the pod via `kubectl cp` and the returned path is the pod-side path so
+ * the agent running there can read it.
+ *
+ * Returns { path } with the filesystem path appropriate for the caller's
+ * instance.
  */
 app.post('/api/clipboard-image', express.raw({ type: 'image/*', limit: '25mb' }), (req, res) => {
   try {
@@ -631,10 +636,30 @@ app.post('/api/clipboard-image', express.raw({ type: 'image/*', limit: '25mb' })
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19)
     const rand = Math.random().toString(36).slice(2, 7)
     const filename = `clipboard-${stamp}-${rand}.${ext}`
-    const filepath = `/tmp/${filename}`
-    writeFileSync(filepath, req.body)
-    console.log(`[clipboard-image] saved ${filepath} (${req.body.length} bytes)`)
-    res.json({ path: filepath, bytes: req.body.length })
+    const localPath = `/tmp/${filename}`
+    writeFileSync(localPath, req.body)
+    console.log(`[clipboard-image] saved ${localPath} (${req.body.length} bytes)`)
+
+    const instanceName = req.query.instance
+    const cfg = instanceName ? instanceConfigs.find(i => i.name === instanceName) : null
+
+    // Pod instance — copy the file into the pod at /tmp/<same-filename>
+    if (cfg?.pod) {
+      const ns = cfg.namespace ?? 'lk-gsd'
+      const ctr = cfg.container ?? 'gsd'
+      const podPath = `/tmp/${filename}`
+      try {
+        execFileSync(KUBECTL, ['cp', localPath, `${ns}/${cfg.pod}:${podPath}`, '-c', ctr],
+          { encoding: 'utf8', timeout: 15000 })
+        console.log(`[clipboard-image] copied to pod ${cfg.pod}:${podPath}`)
+        return res.json({ path: podPath, bytes: req.body.length, instance: cfg.name, pod: true })
+      } catch (err) {
+        console.warn(`[clipboard-image] kubectl cp failed for ${cfg.name}: ${err.message}`)
+        // Fall through to return the local path — better than nothing
+      }
+    }
+
+    res.json({ path: localPath, bytes: req.body.length, instance: cfg?.name ?? null, pod: false })
   } catch (err) {
     console.error('[clipboard-image] save failed:', err)
     res.status(500).json({ error: err.message || 'failed to save image' })
@@ -833,6 +858,79 @@ app.post('/api/terminal/:name/session', (req, res) => {
   }
 })
 
+/**
+ * POST /api/terminal/:name/mouse
+ * Body: { enabled: boolean, session?: string }
+ * Toggles tmux mouse mode on the target instance. Pod instances run the
+ * command via kubectl exec; local instances run tmux directly.
+ */
+app.post('/api/terminal/:name/mouse', (req, res) => {
+  const cfg = instanceConfigs.find(i => i.name === req.params.name)
+  if (!cfg) return res.status(404).json({ error: 'instance not found' })
+  const enabled = req.body?.enabled === true
+  const targetSession = req.body?.session
+  if (targetSession && !/^[\w\-]+$/.test(targetSession)) {
+    return res.status(400).json({ error: 'invalid session name' })
+  }
+  const flag = enabled ? 'on' : 'off'
+  try {
+    // `set -g mouse <on|off>` toggles globally. If a session is specified,
+    // we scope to that session with -t for predictability.
+    const tmuxArgs = targetSession
+      ? ['set', '-t', targetSession, '-g', 'mouse', flag]
+      : ['set', '-g', 'mouse', flag]
+    if (cfg.pod) {
+      const ns  = cfg.namespace ?? 'lk-gsd', ctr = cfg.container ?? 'gsd'
+      execFileSync(KUBECTL, ['exec', cfg.pod, '-n', ns, '-c', ctr, '--', 'tmux', ...tmuxArgs],
+        { encoding: 'utf8', timeout: 5000 })
+    } else {
+      execFileSync('tmux', tmuxArgs, { encoding: 'utf8', timeout: 5000 })
+    }
+    console.log(`[terminal] mouse=${flag} for ${cfg.name}${targetSession ? '/' + targetSession : ''}`)
+    res.json({ ok: true, mouse: flag })
+  } catch (err) {
+    console.warn(`[terminal] mouse toggle failed for ${cfg.name}: ${err.message}`)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ─── ttyd reverse proxy ───────────────────────────────────────────────────────
+// Same-origin proxy so the terminal iframe shares the dashboard's origin.
+// This is what makes auto-copy-on-selection actually work — cross-origin
+// iframes (different ports) silently block contentDocument access.
+
+function isKnownTtydPort(port) {
+  for (const entry of ttydProcs.values()) {
+    if (entry.port === port) return true
+  }
+  return false
+}
+
+// HTTP proxy: /ttyd/<port>/<path> → http://127.0.0.1:<port>/<path>
+app.use('/ttyd/:port', (req, res) => {
+  const port = parseInt(req.params.port, 10)
+  if (!Number.isFinite(port) || !isKnownTtydPort(port)) {
+    return res.status(404).send('Unknown ttyd port')
+  }
+  // Express strips the matched prefix; req.url is the path after /ttyd/<port>
+  const targetPath = req.url || '/'
+  const proxyReq = httpRequest({
+    host: '127.0.0.1',
+    port,
+    method: req.method,
+    path: targetPath,
+    headers: { ...req.headers, host: `127.0.0.1:${port}` }
+  }, proxyRes => {
+    res.writeHead(proxyRes.statusCode || 502, proxyRes.headers)
+    proxyRes.pipe(res)
+  })
+  proxyReq.on('error', err => {
+    console.warn(`[ttyd-proxy] http error port=${port} path=${targetPath}: ${err.message}`)
+    if (!res.headersSent) res.status(502).send('ttyd upstream error')
+  })
+  req.pipe(proxyReq)
+})
+
 // ─── Full-page terminal tab ───────────────────────────────────────────────────
 
 app.get('/terminal-page/:name', (req, res) => {
@@ -869,6 +967,7 @@ app.get('/terminal-page/:name', (req, res) => {
     .bar-btn{background:none;border:1px solid #2e3349;border-radius:4px;
       color:#64748b;font-size:11px;padding:3px 8px;cursor:pointer;transition:border-color .15s,color .15s;white-space:nowrap}
     .bar-btn:hover{border-color:#6366f1;color:#e2e8f0}
+    .bar-btn.active{border-color:#22c55e;color:#86efac;background:#0a2a1e}
     #settings-btn{font-size:13px}
     #settings-panel{display:none;position:absolute;top:40px;right:12px;
       background:#1a1d27;border:1px solid #2e3349;border-radius:8px;
@@ -895,7 +994,8 @@ app.get('/terminal-page/:name', (req, res) => {
     <span id="bar-title">${cfg.name}</span>
     <span id="bar-session">${sessionName}</span>
     <span id="bar-spacer"></span>
-    <button class="bar-btn" id="copy-btn" onclick="copyTerminalSelection()" title="Copy selection (Cmd+C)">⌘C Copy</button>
+    <button class="bar-btn" id="mouse-toggle-btn" onclick="toggleMouseMode()" title="Toggle tmux mouse mode (off = text selection works)">Mouse: off</button>
+    <button class="bar-btn" id="copy-btn" onclick="copyTerminalSelection()" title="Copy selection (or just select with mouse — auto-copies when tmux mouse is off)">⌘C Copy</button>
     <button class="bar-btn" id="paste-btn" onclick="pasteFromClipboard()" title="Paste (Cmd+V)">⌘V Paste</button>
     <button class="bar-btn" id="settings-btn" onclick="toggleSettings(event)">⚙</button>
     <div id="settings-panel">
@@ -937,8 +1037,8 @@ app.get('/terminal-page/:name', (req, res) => {
         else{wrap.style.maxWidth='';wrap.style.margin=''}
         ttydPort=data.port
         const url=IS_LOCAL
-          ?'http://localhost:'+data.port+'/'
-          :'http://localhost:'+data.port+'/?arg='+encodeURIComponent(SESSION+':0')
+          ?'/ttyd/'+data.port+'/'
+          :'/ttyd/'+data.port+'/?arg='+encodeURIComponent(SESSION+':0')
         document.getElementById('ttyd-frame').src=url
         // Connect our own WS for paste injection
         connectPasteWs(data.port)
@@ -953,7 +1053,8 @@ app.get('/terminal-page/:name', (req, res) => {
 
     function connectPasteWs(port){
       if(ttydWs){try{ttydWs.close()}catch{}}
-      const ws=new WebSocket('ws://localhost:'+port+'/ws')
+      const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const ws=new WebSocket(wsProto+'//'+location.host+'/ttyd/'+port+'/ws')
       ws.binaryType='arraybuffer'
       ws.onopen=()=>{
         // Auth handshake
@@ -969,60 +1070,204 @@ app.get('/terminal-page/:name', (req, res) => {
     }
 
     function sendPaste(text){
+      // Use the iframe's xterm.term.paste() — that writes through the iframe's
+      // existing WS connection, so the data reaches the actual terminal session.
+      // (A separate WS would land in a phantom ttyd session that nobody renders.)
+      const term = document.getElementById('ttyd-frame')?.contentWindow?.term
+      if(term && typeof term.paste === 'function'){
+        try { term.paste(text); return } catch(e){ console.warn('[paste] term.paste failed:', e.message) }
+      }
+      // Fallback: direct WS to ttyd (legacy path — kept in case iframe isn't loaded yet)
       if(!ttydWs||ttydWs.readyState!==WebSocket.OPEN){
         if(ttydPort) connectPasteWs(ttydPort)
         setTimeout(()=>sendPaste(text),300)
         return
       }
-      // Wrap in bracketed paste sequences so tmux/shell handles multi-line correctly
       const wrapped='\x1b[200~'+text+'\x1b[201~'
       const encoded=new TextEncoder().encode(wrapped)
       const msg=new Uint8Array(encoded.length+1)
-      msg[0]=1  // type=input
+      msg[0]=1
       msg.set(encoded,1)
       ttydWs.send(msg)
     }
 
     async function pasteFromClipboard(){
+      // First try the rich Clipboard API for images
+      if(navigator.clipboard?.read){
+        try{
+          const items = await navigator.clipboard.read()
+          for(const item of items){
+            const imgType = item.types.find(t => t.startsWith('image/'))
+            if(imgType){
+              const blob = await item.getType(imgType)
+              await handleImagePaste(blob)
+              return
+            }
+          }
+        }catch(e){
+          // Fall through to text path — happens when nothing in clipboard or permission not yet granted
+          console.debug('[paste] clipboard.read failed:', e.message)
+        }
+      }
+      // Text path
       try{
         const text=await navigator.clipboard.readText()
         if(text) sendPaste(text)
       }catch(e){
         console.warn('[paste] clipboard read failed:',e.message)
-        // Fallback: focus iframe and let user Cmd+V natively
         document.getElementById('ttyd-frame').focus()
         alert('Clipboard access denied. Click inside the terminal and use Cmd+V.')
       }
     }
 
     async function copyTerminalSelection(){
-      const iframe=document.getElementById('ttyd-frame')
-      try{ iframe.focus() }catch{}
-
-      let selected=''
-      try{
-        selected=iframe.contentWindow?.term?.getSelection?.() ?? ''
-      }catch{}
+      // Try cached first (auto-captured on mouseup), fall back to live selection
+      let selected = cachedSelection
+      if(!selected){
+        try{
+          selected = document.getElementById('ttyd-frame')?.contentWindow?.term?.getSelection?.() ?? ''
+        }catch{}
+      }
 
       if(!selected){
-        alert('Select text inside the terminal first, then click Copy.')
+        alert('Select text inside the terminal first, then click Copy or press Cmd+C.')
         return
       }
 
       try{
         await navigator.clipboard.writeText(selected)
+        const btn = document.getElementById('copy-btn')
+        const orig = btn.textContent
+        btn.textContent = '✓ Copied'
+        setTimeout(() => { btn.textContent = orig }, 900)
       }catch(e){
         console.warn('[copy] clipboard write failed:',e.message)
         alert('Clipboard write failed. Grant clipboard permission for this page and try again.')
       }
     }
 
-    // Intercept Cmd+V in the outer page and route to paste function
-    document.addEventListener('keydown',e=>{
-      if((e.metaKey||e.ctrlKey)&&e.key==='v'){
-        e.preventDefault()
-        pasteFromClipboard()
+    // ── Auto-copy on selection (X11-style) ───────────────────────────────────
+    // Watch the iframe's xterm selection. When the user releases the mouse with
+    // non-empty selection, write it straight to the clipboard — no Copy button
+    // needed, no timing race with iframe focus loss.
+    let cachedSelection = ''
+    let lastWrittenSelection = ''
+
+    async function autoCopyIfNew(){
+      let sel = ''
+      try{
+        sel = document.getElementById('ttyd-frame')?.contentWindow?.term?.getSelection?.() ?? ''
+      }catch{}
+      if(!sel) return
+      cachedSelection = sel
+      if(sel === lastWrittenSelection) return
+      try{
+        await navigator.clipboard.writeText(sel)
+        lastWrittenSelection = sel
+        flashStatus('Selection copied')
+      }catch{
+        // Browser may deny clipboard write without a user gesture. The Copy
+        // button click is always a gesture, so falling back is fine.
       }
+    }
+
+    function flashStatus(text){
+      const dot = document.getElementById('bar-dot')
+      if(!dot || dot.__flashing) return
+      dot.__flashing = true
+      const prevTitle = dot.title
+      dot.title = text
+      dot.style.background = '#facc15'
+      setTimeout(()=>{ dot.style.background='#22c55e'; dot.title=prevTitle; dot.__flashing=false }, 600)
+    }
+
+    function wireIframeSelectionCapture(){
+      const iframe = document.getElementById('ttyd-frame')
+      try{
+        const doc = iframe.contentDocument || iframe.contentWindow?.document
+        if(!doc || doc.__selectionWired) return
+        doc.__selectionWired = true
+        doc.addEventListener('mouseup', () => setTimeout(autoCopyIfNew, 30))
+        doc.addEventListener('keyup', e => {
+          // Shift+arrow selections — copy when key released
+          if(e.shiftKey) setTimeout(autoCopyIfNew, 30)
+        })
+        // Intercept paste inside the iframe so image pastes work even when focus is in xterm.
+        // (We do NOT listen for keydown Cmd+V — the native gesture fires both keydown AND
+        // paste events; handling keydown causes double-fire and weird character spew.)
+        doc.addEventListener('paste', handleIframePaste, true)
+      }catch{
+        // Cross-origin until the iframe URL becomes same-origin (localhost:ttydPort)
+        setTimeout(wireIframeSelectionCapture, 500)
+      }
+    }
+
+    async function handleIframePaste(e){
+      const items = Array.from(e.clipboardData?.items ?? [])
+      const imageItem = items.find(it => it.type?.startsWith('image/'))
+      if(imageItem){
+        e.preventDefault()
+        e.stopPropagation()
+        const blob = imageItem.getAsFile()
+        if(blob) await handleImagePaste(blob)
+      }
+      // For text, let xterm's default paste handler work
+    }
+    document.getElementById('ttyd-frame').addEventListener('load', () => {
+      setTimeout(wireIframeSelectionCapture, 100)
+    })
+    // Initial attempt in case the iframe is already loaded
+    setTimeout(wireIframeSelectionCapture, 200)
+
+    // ── Image paste support ──────────────────────────────────────────────────
+    // When the clipboard contains an image (e.g. screenshot), upload it to /tmp
+    // on the server and inject [image: /tmp/path] into the terminal so the agent
+    // running inside can read it.
+    // Guard against double-fire (e.g. if both outer and iframe paste handlers run)
+    let imagePasteInFlight = false
+
+    async function handleImagePaste(blob){
+      if(imagePasteInFlight){
+        console.debug('[image-paste] already in flight, skipping')
+        return
+      }
+      imagePasteInFlight = true
+      try{
+        flashStatus('Uploading image…')
+        const url = '/api/clipboard-image?instance=' + encodeURIComponent(INST)
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': blob.type || 'image/png' },
+          body: blob
+        })
+        const data = await res.json()
+        if(!res.ok) throw new Error(data?.error || ('HTTP ' + res.status))
+        sendPaste('[image: ' + data.path + ']')
+        flashStatus((data.pod ? 'Pod image: ' : 'Image: ') + data.path)
+      }catch(e){
+        console.warn('[image-paste] failed:', e.message)
+        alert('Failed to save pasted image: ' + e.message)
+      }finally{
+        // Brief debounce window so duplicate paste events from both outer+iframe listeners
+        // don't trigger a second upload immediately after the first completes.
+        setTimeout(()=>{ imagePasteInFlight = false }, 500)
+      }
+    }
+
+    // Outer-page paste handler: image → upload + inject reference, text → fall through
+    document.addEventListener('paste', async e => {
+      const items = Array.from(e.clipboardData?.items ?? [])
+      const imageItem = items.find(it => it.type?.startsWith('image/'))
+      if(imageItem){
+        e.preventDefault()
+        const blob = imageItem.getAsFile()
+        if(blob) await handleImagePaste(blob)
+      }
+    })
+
+    // Intercept Cmd+, for settings (Cmd+V is handled by the paste event listeners
+    // — adding a keydown handler here would cause double-fire with the native paste event).
+    document.addEventListener('keydown',e=>{
       if((e.metaKey||e.ctrlKey)&&e.key===','){
         e.preventDefault()
         toggleSettings(e)
@@ -1033,6 +1278,62 @@ app.get('/terminal-page/:name', (req, res) => {
     function closeSettings(){document.getElementById('settings-panel').classList.remove('open')}
     document.addEventListener('click',closeSettings)
     document.getElementById('settings-panel').addEventListener('click',e=>e.stopPropagation())
+
+    // ── Tmux mouse-mode toggle ───────────────────────────────────────────────
+    // tmux's mouse-mode intercepts mouse drags, breaking text selection. We
+    // default to off (so selection just works) and let the user re-enable it
+    // when they want mouse scroll / pane resize in tmux.
+    const MOUSE_KEY = 'gsd-cp-tmux-mouse:' + INST
+    let mouseEnabled = (() => {
+      try { return localStorage.getItem(MOUSE_KEY) === 'on' } catch { return false }
+    })()
+
+    function updateMouseToggleBtn(){
+      const btn = document.getElementById('mouse-toggle-btn')
+      if (!btn) return
+      btn.textContent = 'Mouse: ' + (mouseEnabled ? 'on' : 'off')
+      btn.classList.toggle('active', mouseEnabled)
+    }
+
+    async function toggleMouseMode(){
+      const next = !mouseEnabled
+      const btn = document.getElementById('mouse-toggle-btn')
+      btn.disabled = true
+      try {
+        const res = await fetch('/api/terminal/' + encodeURIComponent(INST) + '/mouse', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: next, session: SESSION })
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data?.error || ('HTTP ' + res.status))
+        mouseEnabled = next
+        try { localStorage.setItem(MOUSE_KEY, next ? 'on' : 'off') } catch {}
+        updateMouseToggleBtn()
+        flashStatus('tmux mouse ' + (next ? 'on' : 'off'))
+      } catch (e) {
+        alert('Failed to toggle tmux mouse mode: ' + e.message)
+      } finally {
+        btn.disabled = false
+      }
+    }
+
+    // Apply the persisted mouse state on initial load — the pod tmux config
+    // defaults to off, but the user may have turned it on previously.
+    async function syncInitialMouseState(){
+      updateMouseToggleBtn()
+      if (mouseEnabled) {
+        // Force enable to match localStorage preference
+        try {
+          await fetch('/api/terminal/' + encodeURIComponent(INST) + '/mouse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: true, session: SESSION })
+          })
+        } catch {}
+      }
+    }
+    syncInitialMouseState()
 
     async function applySettings(){
       const fontSize=parseInt(document.getElementById('sp-fontsize').value)
@@ -1056,6 +1357,40 @@ app.get('/terminal-page/:name', (req, res) => {
 // ─── Start ────────────────────────────────────────────────────────────────────
 
 const httpServer = createServer(app)
+
+// WebSocket upgrade proxy for ttyd: /ttyd/<port>/ws → ws://127.0.0.1:<port>/ws
+httpServer.on('upgrade', (req, clientSocket, head) => {
+  const m = (req.url || '').match(/^\/ttyd\/(\d+)(\/.*)?$/)
+  if (!m) {
+    clientSocket.destroy()
+    return
+  }
+  const port = parseInt(m[1], 10)
+  const upstreamPath = m[2] || '/'
+  if (!Number.isFinite(port) || !isKnownTtydPort(port)) {
+    clientSocket.write('HTTP/1.1 404 Not Found\r\n\r\n')
+    clientSocket.destroy()
+    return
+  }
+  const upstream = netConnect(port, '127.0.0.1', () => {
+    const lines = [
+      `GET ${upstreamPath} HTTP/1.1`,
+      `Host: 127.0.0.1:${port}`,
+      ...Object.entries(req.headers).map(([k, v]) => `${k}: ${v}`),
+      '', ''
+    ]
+    upstream.write(lines.join('\r\n'))
+    if (head && head.length) upstream.write(head)
+    upstream.pipe(clientSocket)
+    clientSocket.pipe(upstream)
+  })
+  upstream.on('error', err => {
+    console.warn(`[ttyd-proxy] ws error port=${port}: ${err.message}`)
+    try { clientSocket.destroy() } catch {}
+  })
+  clientSocket.on('error', () => { try { upstream.destroy() } catch {} })
+})
+
 httpServer.listen(PORT, () => {
   console.log(`[server] Listening on http://localhost:${PORT}`)
 })

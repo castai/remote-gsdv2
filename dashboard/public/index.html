@@ -2332,8 +2332,20 @@ function isWithinDoneWindow(dateStr) {
 }
 
 function applyFilter() {
+  try { localStorage.setItem('gsd-cp-done-days', document.getElementById('done-days').value) } catch {}
   if (currentData) render(currentData)
 }
+
+// Restore saved Done window filter on load
+;(() => {
+  try {
+    const saved = localStorage.getItem('gsd-cp-done-days')
+    if (saved !== null) {
+      const sel = document.getElementById('done-days')
+      if (sel && [...sel.options].some(o => o.value === saved)) sel.value = saved
+    }
+  } catch {}
+})()
 
 function slugifyVibeCardId(value) {
   const base = String(value ?? '')
