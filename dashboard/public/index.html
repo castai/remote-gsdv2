@@ -1927,6 +1927,7 @@
     <button id="show-hidden-btn" onclick="toggleShowHidden()" style="display:none">Show hidden</button>
     <button class="vibe-add-btn" type="button" onclick="openCreateVibeModal()">+ Vibe</button>
     <button class="jira-board-btn" type="button" onclick="openJiraBoardModal()">Link JIRA Board</button>
+    <button id="jira-toggle-btn" class="jira-board-btn" type="button" onclick="toggleJiraVisibility()" title="Hide Jira tickets" aria-pressed="true">🎫 Jira</button>
     <div class="jira-board-list" id="header-jira-boards"></div>
     <div class="status-dot" id="status-dot"></div>
     <span id="last-updated">—</span>
@@ -2646,6 +2647,24 @@ let hiddenJiraBoards = new Set(
   (() => { try { return JSON.parse(localStorage.getItem(HIDDEN_JIRA_BOARDS_KEY) || '[]') } catch { return [] } })()
 )
 
+const JIRA_HIDDEN_KEY = 'gsd-cp-jira-hidden'
+let jiraHidden = (() => { try { return localStorage.getItem(JIRA_HIDDEN_KEY) === 'true' } catch { return false } })()
+
+function toggleJiraVisibility() {
+  jiraHidden = !jiraHidden
+  try { localStorage.setItem(JIRA_HIDDEN_KEY, String(jiraHidden)) } catch {}
+  updateJiraToggleBtn()
+  if (currentData) render(currentData)
+}
+
+function updateJiraToggleBtn() {
+  const btn = document.getElementById('jira-toggle-btn')
+  if (!btn) return
+  btn.title = jiraHidden ? 'Show Jira tickets' : 'Hide Jira tickets'
+  btn.style.opacity = jiraHidden ? '0.4' : '1'
+  btn.setAttribute('aria-pressed', String(!jiraHidden))
+}
+
 function persistHiddenJiraBoards() {
   try { localStorage.setItem(HIDDEN_JIRA_BOARDS_KEY, JSON.stringify([...hiddenJiraBoards])) } catch {}
 }
@@ -3254,6 +3273,7 @@ function vibeLaneColor(laneId) {
 // ── JIRA board management ────────────────────────────────────────────────────
 
 let jiraBoards = []
+let jiraSiteUrl = ''
 let jiraIssues = {}  // key → issue[]
 let jiraBoardsLoading = false
 let jiraSearchLoading = false
@@ -3290,6 +3310,7 @@ async function loadJiraBoards() {
     }
     if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`)
     jiraBoards = Array.isArray(json?.boards) ? json.boards : []
+    jiraSiteUrl = json?.siteUrl ?? ''
     renderHeaderJiraBoards()
   } catch (error) {
     console.warn('[jira-boards] load failed:', error.message)
@@ -3582,6 +3603,7 @@ function triggerBoardRefresh(reason) {
 // Fallback polling — keeps working if SSE/Redis is down
 setInterval(poll, POLL)
 poll()
+updateJiraToggleBtn()
 
 // ── Real-time SSE subscription ───────────────────────────────────────────────
 // Subscribes to server-sent events. On unit-start/unit-end, triggers an
@@ -3735,7 +3757,7 @@ function renderBoard(milestones, instances, quickTasks) {
       : []
 
     // JIRA issues for this phase (computed early for count accuracy)
-    const phaseJiraIssues = Object.entries(jiraIssues)
+    const phaseJiraIssues = jiraHidden ? [] : Object.entries(jiraIssues)
       .filter(([k]) => !hiddenJiraBoards.has(k))
       .flatMap(([, issues]) => issues)
       .filter(issue => jiraStatusToPhase(issue.status) === phase)
@@ -3822,7 +3844,7 @@ function renderBoard(milestones, instances, quickTasks) {
     }
 
     // JIRA cards for this phase
-    for (const issue of (jiraBoards.length > 0 ? phaseJiraIssues : [])) {
+    for (const issue of (jiraBoards.length > 0 && !jiraHidden ? phaseJiraIssues : [])) {
       colEl.appendChild(makeJiraCard(issue))
     }
 
@@ -3925,6 +3947,7 @@ function makeVibeCard(cardData, linkedQt = null) {
 function makeJiraCard(issue) {
   const card = document.createElement('div')
   card.className = 'card jira-card'
+  card.style.cursor = 'pointer'
 
   const key = issue?.key ?? ''
   const summary = issue?.summary ?? ''
@@ -3946,7 +3969,49 @@ function makeJiraCard(issue) {
       <span class="jira-assignee">${esc(assignee ?? '—')}</span>
     </div>
   `
+  card.addEventListener('click', () => openJiraPanel(issue))
   return card
+}
+
+function openJiraPanel(issue) {
+  const key      = issue?.key ?? ''
+  const summary  = issue?.summary ?? ''
+  const status   = issue?.status ?? '—'
+  const type     = issue?.type ?? '—'
+  const priority = issue?.priority ?? '—'
+  const assignee = issue?.assignee ?? '—'
+  const url      = jiraSiteUrl ? `${jiraSiteUrl}/browse/${key}` : null
+
+  selectedCard = null  // deselect any milestone card
+
+  document.getElementById('panel-title').textContent = key
+
+  const meta = document.getElementById('panel-meta')
+  meta.innerHTML = `
+    <span class="pill ${esc(status)}">${esc(status)}</span>
+    <span class="jira-badge">JIRA</span>
+    ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener" style="font-size:11px;color:var(--accent);text-decoration:none;" title="Open in Jira">↗ Open</a>` : ''}
+  `
+
+  const body = document.getElementById('panel-body')
+  body.innerHTML = `
+    <div class="panel-section">
+      <div class="panel-section-title">Summary</div>
+      <div style="font-size:13px;line-height:1.5;color:var(--text)">${esc(summary)}</div>
+    </div>
+    <div class="panel-section">
+      <div class="panel-section-title">Details</div>
+      <table style="font-size:12px;border-collapse:collapse;width:100%">
+        <tr><td style="padding:4px 8px 4px 0;color:var(--muted);white-space:nowrap">Status</td><td style="padding:4px 0">${esc(status)}</td></tr>
+        <tr><td style="padding:4px 8px 4px 0;color:var(--muted);white-space:nowrap">Type</td><td style="padding:4px 0">${esc(type)}</td></tr>
+        <tr><td style="padding:4px 8px 4px 0;color:var(--muted);white-space:nowrap">Priority</td><td style="padding:4px 0">${esc(priority)}</td></tr>
+        <tr><td style="padding:4px 8px 4px 0;color:var(--muted);white-space:nowrap">Assignee</td><td style="padding:4px 0">${esc(assignee)}</td></tr>
+        ${url ? `<tr><td style="padding:4px 8px 4px 0;color:var(--muted);white-space:nowrap">Link</td><td style="padding:4px 0"><a href="${esc(url)}" target="_blank" rel="noopener" style="color:var(--accent);font-size:12px">${esc(url)}</a></td></tr>` : ''}
+      </table>
+    </div>
+  `
+
+  document.getElementById('panel-overlay').classList.add('visible')
 }
 
 function makeCard(m) {

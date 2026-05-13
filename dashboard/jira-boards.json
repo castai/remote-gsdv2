@@ -1,3 +1,9 @@
 {
-  "boards": []
+  "boards": [
+    {
+      "key": "SA",
+      "name": "sales-analyzer",
+      "boardId": 11337
+    }
+  ]
 }

@@ -945,7 +945,7 @@ function requireJiraEnabled(req, res, next) {
 }
 
 app.get('/api/jira/boards', requireJiraEnabled, (req, res) => {
-  res.json({ boards: jiraBoardStore.boards })
+  res.json({ boards: jiraBoardStore.boards, siteUrl: jiraConfig.siteUrl })
 })
 
 app.post('/api/jira/boards', requireJiraEnabled, (req, res) => {
@@ -1017,6 +1017,7 @@ app.get('/api/jira/projects', requireJiraEnabled, async (req, res) => {
 })
 
 app.get('/api/jira/boards/:key/issues', requireJiraEnabled, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store')
   const key = req.params.key
   const board = jiraBoardStore.boards.find(b => b.key === key)
   if (!board) return res.status(404).json({ error: 'board not linked' })
@@ -1030,9 +1031,15 @@ app.get('/api/jira/boards/:key/issues', requireJiraEnabled, async (req, res) => 
   }
 
   try {
-    const jql = encodeURIComponent(`project = ${key} ORDER BY updated DESC`)
-    const searchUrl = `/search?jql=${jql}&maxResults=50&fields=summary,status,assignee,priority,issuetype`
-    const { status, json } = await jiraFetch(searchUrl)
+    const searchUrl = `/search/jql`
+    const { status, json } = await jiraFetch(searchUrl, {
+      method: 'POST',
+      body: JSON.stringify({
+        jql: `project = ${key} ORDER BY updated DESC`,
+        maxResults: 50,
+        fields: ['summary', 'status', 'assignee', 'priority', 'issuetype']
+      })
+    })
     if (status !== 200) {
       const msg = json?.errorMessages?.[0] || `JIRA returned ${status}`
       console.error(`[jira-issues] fetch failed key=${key} error=${msg}`)
@@ -1433,6 +1440,17 @@ app.get('/terminal-page/:name', (req, res) => {
         // (We do NOT listen for keydown Cmd+V — the native gesture fires both keydown AND
         // paste events; handling keydown causes double-fire and weird character spew.)
         doc.addEventListener('paste', handleIframePaste, true)
+        // Shift+Enter -> inject \\n (newline without carriage return).
+        // xterm.js sends \\r for plain Enter; pi/Ink treats \\r as submit.
+        // Capturing here before xterm sees the event lets us substitute \\n,
+        // which Ink treats as a soft newline in the input buffer.
+        doc.addEventListener('keydown', e => {
+          if(e.key === 'Enter' && e.shiftKey){
+            e.preventDefault()
+            e.stopImmediatePropagation()
+            sendPaste('\\n')
+          }
+        }, true)
       }catch{
         // Cross-origin until the iframe URL becomes same-origin (localhost:ttydPort)
         setTimeout(wireIframeSelectionCapture, 500)

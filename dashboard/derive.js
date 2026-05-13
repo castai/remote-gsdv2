@@ -120,20 +120,22 @@ function deriveAttention(milestone, { pausedSession, stuckState, recentNotificat
     }
 
     // ── Non-step-mode: real errors ───────────────────────────────────────────
-    // If there's an active session the user/auto-mode is working — not blocked
-    if (hasActiveSession) {
-      return { attention: 'Healthy', attentionDetail: null }
-    }
+    // Non-step-mode paused means auto-mode stopped and needs human attention.
+    // hasActiveSession only reflects a recently-written session file — that's
+    // true immediately after pausing too, so don't use it to suppress the signal.
 
     // lastError.unitId may equal mid (milestone-level unit) or mid/... (slice/task)
     const errBelongsHere = lastError && lastError.unitId &&
       (lastError.unitId === mid || lastError.unitId.startsWith(mid + '/'))
     if (errBelongsHere) {
-      // Transient errors (429, rate limits, session failures) self-recover —
-      // show Healthy so the board doesn't alarm on expected retry behaviour.
-      // Only surface as Blocked/Errored if the error is non-transient.
+      // Transient errors (429, rate limits, session failures) normally self-recover,
+      // but if paused-session.json exists alongside the transient error, auto-mode
+      // actually stopped — surface as Blocked so the human knows to check.
       if (lastError.isTransient) {
-        return { attention: 'Healthy', attentionDetail: null }
+        return {
+          attention:       'Blocked',
+          attentionDetail: `Auto-mode paused at ${pausedSession.unitId} (transient timeout) since ${pausedSession.pausedAt?.slice(0, 19) ?? 'unknown'}`
+        }
       }
       return {
         attention:       'Errored',
