@@ -1192,17 +1192,10 @@ app.get('/terminal-page/:name', (req, res) => {
           // Shift+arrow selections — copy when key released
           if(e.shiftKey) setTimeout(autoCopyIfNew, 30)
         })
-        // Intercept paste inside the iframe so image pastes work even when focus is in xterm
+        // Intercept paste inside the iframe so image pastes work even when focus is in xterm.
+        // (We do NOT listen for keydown Cmd+V — the native gesture fires both keydown AND
+        // paste events; handling keydown causes double-fire and weird character spew.)
         doc.addEventListener('paste', handleIframePaste, true)
-        // Also intercept Cmd+V keydown inside the iframe — some browsers fire paste only on input elements
-        doc.addEventListener('keydown', e => {
-          if((e.metaKey || e.ctrlKey) && (e.key === 'v' || e.key === 'V')){
-            // Don't preventDefault yet — we don't know if it's an image until we read the clipboard
-            // Trigger pasteFromClipboard which handles both images and text
-            e.preventDefault()
-            pasteFromClipboard()
-          }
-        }, true)
       }catch{
         // Cross-origin until the iframe URL becomes same-origin (localhost:ttydPort)
         setTimeout(wireIframeSelectionCapture, 500)
@@ -1230,7 +1223,15 @@ app.get('/terminal-page/:name', (req, res) => {
     // When the clipboard contains an image (e.g. screenshot), upload it to /tmp
     // on the server and inject [image: /tmp/path] into the terminal so the agent
     // running inside can read it.
+    // Guard against double-fire (e.g. if both outer and iframe paste handlers run)
+    let imagePasteInFlight = false
+
     async function handleImagePaste(blob){
+      if(imagePasteInFlight){
+        console.debug('[image-paste] already in flight, skipping')
+        return
+      }
+      imagePasteInFlight = true
       try{
         flashStatus('Uploading image…')
         const url = '/api/clipboard-image?instance=' + encodeURIComponent(INST)
@@ -1246,6 +1247,10 @@ app.get('/terminal-page/:name', (req, res) => {
       }catch(e){
         console.warn('[image-paste] failed:', e.message)
         alert('Failed to save pasted image: ' + e.message)
+      }finally{
+        // Brief debounce window so duplicate paste events from both outer+iframe listeners
+        // don't trigger a second upload immediately after the first completes.
+        setTimeout(()=>{ imagePasteInFlight = false }, 500)
       }
     }
 
@@ -1260,12 +1265,9 @@ app.get('/terminal-page/:name', (req, res) => {
       }
     })
 
-    // Intercept Cmd+V in the outer page and route to paste function
+    // Intercept Cmd+, for settings (Cmd+V is handled by the paste event listeners
+    // — adding a keydown handler here would cause double-fire with the native paste event).
     document.addEventListener('keydown',e=>{
-      if((e.metaKey||e.ctrlKey)&&e.key==='v'){
-        e.preventDefault()
-        pasteFromClipboard()
-      }
       if((e.metaKey||e.ctrlKey)&&e.key===','){
         e.preventDefault()
         toggleSettings(e)
