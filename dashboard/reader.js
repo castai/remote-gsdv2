@@ -62,10 +62,28 @@ except Exception as e:
     result['errors'].append({'source': 'state-manifest', 'error': str(e)})
 
 # runtime/paused-session.json
+# Cross-check against auto.lock: if auto-mode has restarted after the pause,
+# the paused-session file is stale and must be ignored.  Without this guard a
+# pod restart (or manual /gsd auto) leaves a stale file that permanently shows
+# the milestone as Blocked even though execution is running fine.
 try:
-    ps_path = GSD + '/runtime/paused-session.json'
+    ps_path   = GSD + '/runtime/paused-session.json'
+    lock_path = GSD + '/auto.lock'
     if os.path.exists(ps_path):
-        result['pausedSession'] = json.load(open(ps_path))
+        ps = json.load(open(ps_path))
+        # If auto.lock exists and started AFTER the pause, the session is stale.
+        stale = False
+        if os.path.exists(lock_path):
+            try:
+                lock = json.load(open(lock_path))
+                paused_at  = ps.get('pausedAt', '')
+                started_at = lock.get('startedAt', '')
+                if started_at and paused_at and started_at > paused_at:
+                    stale = True
+            except Exception:
+                pass  # unreadable lock — don't suppress the paused session
+        if not stale:
+            result['pausedSession'] = ps
 except Exception as e:
     result['errors'].append({'source': 'paused-session', 'error': str(e)})
 
