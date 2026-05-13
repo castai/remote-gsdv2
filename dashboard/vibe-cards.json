@@ -89,7 +89,7 @@
       "title": "implement copy from pod + image support",
       "description": null,
       "status": "open",
-      "lane": "planning",
+      "lane": "done",
       "priority": "medium",
       "tags": [],
       "metadata": {
@@ -101,7 +101,7 @@
       },
       "comments": [],
       "createdAt": "2026-05-13T14:12:25.729Z",
-      "updatedAt": "2026-05-13T14:14:39.934Z"
+      "updatedAt": "2026-05-13T15:04:33.211Z"
     }
   ]
 }

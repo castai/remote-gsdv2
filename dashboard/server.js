@@ -14,6 +14,10 @@
  * POST   /api/vibe-cards             — create a persisted Vibe Card
  * PATCH  /api/vibe-cards/:id         — update a persisted Vibe Card
  * DELETE /api/vibe-cards/:id         — delete a persisted Vibe Card
+ * GET    /api/jira/boards            — list linked JIRA boards
+ * POST   /api/jira/boards            — link a JIRA board
+ * DELETE /api/jira/boards/:key       — unlink a JIRA board
+ * GET    /api/jira/projects          — search JIRA projects
  * GET    /terminal-page/:name        — full-page terminal HTML (new tab)
  *
  * Real-time architecture:
@@ -43,6 +47,8 @@ const POLL_MS         = parseInt(process.env.POLL_INTERVAL_MS ?? '5000', 10)
 const INSTANCES_FILE  = resolve(process.env.INSTANCES_FILE ?? resolve(__dir, 'instances.json'))
 const PREFS_FILE      = resolve(__dir, 'terminal-prefs.json')
 const VIBE_CARDS_FILE = resolve(__dir, 'vibe-cards.json')
+const JIRA_CONFIG_FILE = resolve(__dir, 'jira-config.json')
+const JIRA_BOARDS_FILE = resolve(process.env.JIRA_BOARDS_FILE ?? resolve(__dir, 'jira-boards.json'))
 
 // ─── Terminal preferences ─────────────────────────────────────────────────────
 
@@ -265,6 +271,116 @@ function applyCardPatch(existingCard, patch) {
 }
 
 const vibeCardStore = loadVibeCards()
+
+// ─── JIRA integration ─────────────────────────────────────────────────────────
+
+function loadJiraConfig() {
+  if (!existsSync(JIRA_CONFIG_FILE)) {
+    console.log(`[jira-config] no config found at ${JIRA_CONFIG_FILE} — JIRA routes disabled`)
+    return null
+  }
+  try {
+    const cfg = JSON.parse(readFileSync(JIRA_CONFIG_FILE, 'utf8'))
+    if (!cfg.site_url || typeof cfg.site_url !== 'string')
+      throw new Error('missing or invalid site_url')
+    if (!cfg.email || typeof cfg.email !== 'string')
+      throw new Error('missing or invalid email')
+    if (!cfg.api_token || typeof cfg.api_token !== 'string')
+      throw new Error('missing or invalid api_token')
+    const siteUrl = cfg.site_url.replace(/\/$/, '')
+    console.log(`[jira-config] loaded site_url=${siteUrl} email=${cfg.email}`)
+    return { siteUrl, email: cfg.email, apiToken: cfg.api_token }
+  } catch (error) {
+    console.error(`[jira-config] failed to load: ${error.message}`)
+    return null
+  }
+}
+
+function validateJiraBoardsPayload(payload) {
+  if (!isPlainObject(payload)) return { error: 'jira-boards.json must contain an object payload' }
+  if (!Array.isArray(payload.boards)) return { error: 'jira-boards.json must contain a boards array' }
+
+  const boards = []
+  const keys = new Set()
+  for (const [index, raw] of payload.boards.entries()) {
+    if (!isPlainObject(raw))
+      return { error: `boards[${index}] must be an object` }
+    if (!raw.key || typeof raw.key !== 'string' || !raw.key.trim())
+      return { error: `boards[${index}] missing key` }
+    if (!raw.name || typeof raw.name !== 'string' || !raw.name.trim())
+      return { error: `boards[${index}] missing name` }
+    if (raw.boardId !== undefined && typeof raw.boardId !== 'number')
+      return { error: `boards[${index}] boardId must be a number` }
+    const key = raw.key.trim()
+    if (keys.has(key)) return { error: `boards[${index}]: duplicate key '${key}'` }
+    keys.add(key)
+    boards.push({
+      key,
+      name: raw.name.trim(),
+      boardId: raw.boardId ?? null
+    })
+  }
+  return { boards }
+}
+
+function createDefaultJiraBoardsFile() {
+  const payload = { boards: [] }
+  writeFileSync(JIRA_BOARDS_FILE, JSON.stringify(payload, null, 2) + '\n')
+  console.log(`[jira-boards] initialized ${JIRA_BOARDS_FILE} with 0 board(s)`)
+  return payload
+}
+
+function loadJiraBoards() {
+  if (!existsSync(JIRA_BOARDS_FILE)) return createDefaultJiraBoardsFile()
+  try {
+    const parsed = JSON.parse(readFileSync(JIRA_BOARDS_FILE, 'utf8'))
+    const validated = validateJiraBoardsPayload(parsed)
+    if (validated.error) {
+      console.error(`[jira-boards] startup validation failed: ${validated.error}`)
+      throw new Error(validated.error)
+    }
+    console.log(`[jira-boards] loaded ${validated.boards.length} board(s) from ${JIRA_BOARDS_FILE}`)
+    return { boards: validated.boards }
+  } catch (error) {
+    console.error(`[jira-boards] startup load failed: ${error.message}`)
+    process.exit(1)
+  }
+}
+
+function persistJiraBoards(action, boardKey) {
+  try {
+    writeFileSync(JIRA_BOARDS_FILE, JSON.stringify(jiraBoardStore, null, 2) + '\n')
+    console.log(`[jira-boards] persisted action=${action} key=${boardKey} total=${jiraBoardStore.boards.length}`)
+  } catch (error) {
+    console.error(`[jira-boards] persist failed action=${action} key=${boardKey}: ${error.message}\n${error.stack}`)
+    throw error
+  }
+}
+
+async function jiraFetch(path, options = {}) {
+  if (!jiraConfig) throw new Error('JIRA not configured')
+  const url = `${jiraConfig.siteUrl}/rest/api/3${path}`
+  const auth = Buffer.from(`${jiraConfig.email}:${jiraConfig.apiToken}`).toString('base64')
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      'Authorization': `Basic ${auth}`,
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      ...options.headers
+    }
+  })
+  let json = null
+  try { json = await response.json() } catch {}
+  return { status: response.status, json }
+}
+
+const jiraConfig = loadJiraConfig()
+const jiraEnabled = !!jiraConfig
+const jiraBoardStore = loadJiraBoards()
+
+const JIRA_ISSUES_TTL_MS = 60_000
+const jiraIssueCache = new Map() // key = boardKey, value = { issues, fetchedAt }
 
 // ─── tmux session discovery ───────────────────────────────────────────────────
 
@@ -818,6 +934,127 @@ app.delete('/api/vibe-cards/:id/comments/:commentId', (req, res) => {
   } catch {
     card.comments = previousComments
     res.status(500).json({ error: 'failed to persist comment deletion' })
+  }
+})
+
+// ─── JIRA routes ──────────────────────────────────────────────────────────────
+
+function requireJiraEnabled(req, res, next) {
+  if (!jiraEnabled) return res.status(503).json({ error: 'JIRA not configured' })
+  next()
+}
+
+app.get('/api/jira/boards', requireJiraEnabled, (req, res) => {
+  res.json({ boards: jiraBoardStore.boards })
+})
+
+app.post('/api/jira/boards', requireJiraEnabled, (req, res) => {
+  const body = req.body ?? {}
+  if (!body.key || typeof body.key !== 'string' || !body.key.trim())
+    return res.status(400).json({ error: 'key is required' })
+  if (!body.name || typeof body.name !== 'string' || !body.name.trim())
+    return res.status(400).json({ error: 'name is required' })
+  if ('boardId' in body && typeof body.boardId !== 'number')
+    return res.status(400).json({ error: 'boardId must be a number' })
+
+  const key = body.key.trim()
+  if (jiraBoardStore.boards.some(b => b.key === key))
+    return res.status(409).json({ error: `board '${key}' already exists` })
+
+  const board = {
+    key,
+    name: body.name.trim(),
+    boardId: body.boardId ?? null
+  }
+
+  jiraBoardStore.boards.push(board)
+
+  try {
+    persistJiraBoards('link', board.key)
+    res.status(201).json({ board })
+  } catch {
+    jiraBoardStore.boards = jiraBoardStore.boards.filter(b => b.key !== key)
+    res.status(500).json({ error: 'failed to persist board' })
+  }
+})
+
+app.delete('/api/jira/boards/:key', requireJiraEnabled, (req, res) => {
+  const idx = jiraBoardStore.boards.findIndex(b => b.key === req.params.key)
+  if (idx === -1) return res.status(404).json({ error: 'board not found' })
+
+  const [removed] = jiraBoardStore.boards.splice(idx, 1)
+
+  try {
+    persistJiraBoards('unlink', removed.key)
+    res.json({ ok: true, key: removed.key })
+  } catch {
+    jiraBoardStore.boards.splice(idx, 0, removed)
+    res.status(500).json({ error: 'failed to persist board removal' })
+  }
+})
+
+app.get('/api/jira/projects', requireJiraEnabled, async (req, res) => {
+  const query = (req.query.q ?? '').trim()
+  const searchUrl = `/project/search?query=${encodeURIComponent(query)}&maxResults=20`
+  try {
+    const { status, json } = await jiraFetch(searchUrl)
+    if (status !== 200) {
+      return res.status(status).json({
+        error: json?.errorMessages?.[0] || `JIRA returned ${status}`,
+        projects: []
+      })
+    }
+    const projects = (json.values ?? []).map(p => ({
+      key: p.key,
+      name: p.name,
+      id: p.id
+    }))
+    res.json({ projects })
+  } catch (error) {
+    console.error(`[jira] project search failed: ${error.message}`)
+    res.status(502).json({ error: 'JIRA request failed', projects: [] })
+  }
+})
+
+app.get('/api/jira/boards/:key/issues', requireJiraEnabled, async (req, res) => {
+  const key = req.params.key
+  const board = jiraBoardStore.boards.find(b => b.key === key)
+  if (!board) return res.status(404).json({ error: 'board not linked' })
+
+  const cached = jiraIssueCache.get(key)
+  if (cached && Date.now() - cached.fetchedAt < JIRA_ISSUES_TTL_MS) {
+    const ageSec = Math.floor((Date.now() - cached.fetchedAt) / 1000)
+    console.log(`[jira-issues] cache hit key=${key} age=${ageSec}s`)
+    res.setHeader('X-Jira-Cache-Age', `${ageSec}s`)
+    return res.json({ issues: cached.issues })
+  }
+
+  try {
+    const jql = encodeURIComponent(`project = ${key} ORDER BY updated DESC`)
+    const searchUrl = `/search?jql=${jql}&maxResults=50&fields=summary,status,assignee,priority,issuetype`
+    const { status, json } = await jiraFetch(searchUrl)
+    if (status !== 200) {
+      const msg = json?.errorMessages?.[0] || `JIRA returned ${status}`
+      console.error(`[jira-issues] fetch failed key=${key} error=${msg}`)
+      return res.status(status).json({
+        error: msg,
+        issues: []
+      })
+    }
+    const issues = (json.issues ?? []).map(issue => ({
+      key: issue.key,
+      summary: issue.fields?.summary ?? '',
+      status: issue.fields?.status?.name ?? 'Unknown',
+      assignee: issue.fields?.assignee?.displayName ?? null,
+      priority: issue.fields?.priority?.name ?? null,
+      type: issue.fields?.issuetype?.name ?? null
+    }))
+    jiraIssueCache.set(key, { issues, fetchedAt: Date.now() })
+    console.log(`[jira-issues] fetched key=${key} count=${issues.length} cached=false`)
+    res.json({ issues })
+  } catch (error) {
+    console.error(`[jira-issues] fetch failed key=${key} error=${error.message}`)
+    res.status(502).json({ error: 'JIRA request failed', issues: [] })
   }
 })
 

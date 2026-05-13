@@ -733,6 +733,98 @@
       margin-bottom: 8px;
     }
 
+    .jira-card {
+      background: linear-gradient(180deg, rgba(0,82,204,0.14), rgba(26,29,39,0.96));
+      border: 1px solid rgba(59,130,246,0.45);
+      border-radius: 8px;
+      padding: 11px 12px;
+      position: relative;
+      transition: border-color 0.15s, transform 0.1s;
+      cursor: default;
+    }
+
+    .jira-card:hover {
+      border-color: #3b82f6;
+      transform: translateY(-1px);
+    }
+
+    .jira-card::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 4px; bottom: 4px;
+      width: 3px;
+      border-radius: 3px 0 0 3px;
+      background: #0052CC;
+    }
+
+    .jira-key {
+      font-size: 10px;
+      font-weight: 600;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      color: var(--accent);
+      margin-bottom: 4px;
+    }
+
+    .jira-summary {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text);
+      line-height: 1.4;
+      margin-bottom: 6px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .jira-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--muted);
+      flex-wrap: wrap;
+    }
+
+    .jira-card-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 4px;
+    }
+
+    .jira-badge {
+      background: #0052CC;
+      color: #fff;
+      border-radius: 3px;
+      padding: 1px 5px;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      flex-shrink: 0;
+    }
+
+    .jira-type-icon {
+      font-size: 12px;
+      line-height: 1;
+    }
+
+    .jira-priority-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+
+    .jira-assignee {
+      color: var(--muted);
+      font-size: 11px;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     .phase-column.drop-target .col-cards {
       background: rgba(99,102,241,0.08);
     }
@@ -1626,6 +1718,183 @@
       opacity: 0.45;
       cursor: default;
     }
+
+    /* ── JIRA board chips + modal ─────────────────────────────── */
+    .jira-board-btn {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--muted);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 4px 10px;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+      white-space: nowrap;
+    }
+    .jira-board-btn:hover { border-color: var(--accent); color: var(--text); }
+
+    .jira-board-list {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .jira-board-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 3px 8px;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text);
+      cursor: default;
+      transition: border-color 0.15s;
+    }
+    .jira-board-chip:hover { border-color: var(--accent); }
+
+    .jira-board-chip .unlink {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 11px;
+      padding: 0 1px;
+      line-height: 1;
+    }
+    .jira-board-chip .unlink:hover { color: var(--errored); }
+
+    .jira-board-chip.jira-board-hidden {
+      opacity: 0.45;
+      text-decoration: line-through;
+    }
+
+    .jira-board-chip .board-toggle {
+      background: none;
+      border: none;
+      color: inherit;
+      cursor: pointer;
+      font-size: inherit;
+      font-weight: inherit;
+      font-family: inherit;
+      padding: 0;
+      line-height: 1;
+    }
+
+    #jira-modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.68);
+      z-index: 330;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    #jira-modal-overlay.visible { display: flex; }
+
+    #jira-modal {
+      width: min(520px, 100%);
+      max-height: calc(100vh - 40px);
+      overflow-y: auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      box-shadow: 0 18px 40px rgba(0,0,0,0.45);
+    }
+
+    .jira-modal-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .jira-modal-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .jira-modal-subtitle {
+      margin-top: 5px;
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .jira-search-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .jira-search-row .field-input { flex: 1; }
+
+    #jira-search-results {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-height: 280px;
+      overflow-y: auto;
+    }
+
+    .jira-search-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 10px;
+      background: var(--surface2);
+      border: 1px solid transparent;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: border-color 0.12s, background 0.12s;
+    }
+    .jira-search-item:hover {
+      background: rgba(99,102,241,0.08);
+      border-color: var(--accent);
+    }
+
+    .jira-search-item-key {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--accent);
+      min-width: 48px;
+    }
+    .jira-search-item-name {
+      font-size: 12px;
+      color: var(--text);
+      flex: 1;
+      padding: 0 8px;
+    }
+
+    .jira-search-empty {
+      font-size: 12px;
+      color: var(--muted);
+      padding: 16px 10px;
+      text-align: center;
+    }
+
+    .jira-boards-section {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .jira-boards-section-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
   </style>
 </head>
 <body>
@@ -1657,6 +1926,8 @@
     </div>
     <button id="show-hidden-btn" onclick="toggleShowHidden()" style="display:none">Show hidden</button>
     <button class="vibe-add-btn" type="button" onclick="openCreateVibeModal()">+ Vibe</button>
+    <button class="jira-board-btn" type="button" onclick="openJiraBoardModal()">Link JIRA Board</button>
+    <div class="jira-board-list" id="header-jira-boards"></div>
     <div class="status-dot" id="status-dot"></div>
     <span id="last-updated">—</span>
   </div>
@@ -1806,6 +2077,36 @@
   </div>
 </div>
 
+<!-- JIRA board modal -->
+<div id="jira-modal-overlay" onclick="maybeCloseJiraModal(event)">
+  <div id="jira-modal">
+    <div class="jira-modal-header">
+      <div>
+        <div class="jira-modal-title">Link JIRA Board</div>
+        <div class="jira-modal-subtitle">Search JIRA projects and link a board to the dashboard.</div>
+      </div>
+      <button class="panel-close" type="button" onclick="closeJiraBoardModal()">✕</button>
+    </div>
+
+    <div class="jira-boards-section" id="jira-linked-section" style="display:none">
+      <div class="jira-boards-section-title">Linked boards</div>
+      <div class="jira-board-list" id="jira-board-list"></div>
+    </div>
+
+    <div class="jira-search-row">
+      <input class="field-input" id="jira-search-input" type="text" placeholder="Search projects…" autocomplete="off" />
+      <button class="btn-primary" type="button" onclick="runJiraSearch()">Search</button>
+    </div>
+
+    <div id="jira-search-results"></div>
+    <div id="jira-modal-error" class="modal-error"></div>
+
+    <div class="modal-actions">
+      <button class="btn-cancel" type="button" onclick="closeJiraBoardModal()">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- Slide-over -->
 <div id="panel-overlay" onclick="closePanel(event)">
   <div id="side-panel">
@@ -1826,6 +2127,34 @@
 
 <script>
 const PHASES = ['Discussing','Researching','Planning','Executing','Validating','Done']
+
+const JIRA_STATUS_PHASE = {
+  'To Do': 'Discussing',
+  'Open': 'Discussing',
+  'Backlog': 'Discussing',
+  'In Progress': 'Executing',
+  'In Review': 'Validating',
+  'Done': 'Done',
+  'Closed': 'Done',
+  'Resolved': 'Done',
+}
+
+function jiraStatusToPhase(status) {
+  return JIRA_STATUS_PHASE[status] ?? 'Executing'
+}
+
+const JIRA_TYPE_ICON = {
+  'Story': '📖', 'Bug': '🐛', 'Task': '✔', 'Epic': '⚡',
+  'Subtask': '↳', 'Sub-task': '↳'
+}
+function jiraTypeIcon(type) { return JIRA_TYPE_ICON[type] ?? '◆' }
+
+const JIRA_PRIORITY_COLOR = {
+  'Highest': '#ef4444', 'High': '#f97316', 'Medium': '#eab308',
+  'Low': '#3b82f6', 'Lowest': '#6b7280'
+}
+function jiraPriorityColor(priority) { return JIRA_PRIORITY_COLOR[priority] ?? '#6b7280' }
+
 const VIBE_LANES = [
   { id: 'discussing',  phase: 'Discussing',  label: 'Discussing' },
   { id: 'researching', phase: 'Researching', label: 'Researching' },
@@ -2210,12 +2539,6 @@ async function refreshBoardState(reason = 'manual') {
   }
 }
 
-function openTerminalTab(instName, sessionName) {
-  const url = sessionName === 'shell'
-    ? `/terminal-page/${encodeURIComponent(instName)}`
-    : `/terminal-page/${encodeURIComponent(instName)}?session=${encodeURIComponent(sessionName)}`
-  window.open(url, `term-${instName}-${sessionName}`)
-}
 
 async function promptNewSession(instName) {
   const sessionName = prompt(`New tmux session name for ${instName}:`, 'steering')
@@ -2316,6 +2639,28 @@ function updateHideToggleButton() {
   }
 }
 
+// ── Hidden JIRA boards ───────────────────────────────────────────────────────
+
+const HIDDEN_JIRA_BOARDS_KEY = 'gsd-cp-hidden-jira-boards'
+let hiddenJiraBoards = new Set(
+  (() => { try { return JSON.parse(localStorage.getItem(HIDDEN_JIRA_BOARDS_KEY) || '[]') } catch { return [] } })()
+)
+
+function persistHiddenJiraBoards() {
+  try { localStorage.setItem(HIDDEN_JIRA_BOARDS_KEY, JSON.stringify([...hiddenJiraBoards])) } catch {}
+}
+
+function toggleJiraBoardVisibility(key) {
+  if (hiddenJiraBoards.has(key)) {
+    hiddenJiraBoards.delete(key)
+  } else {
+    hiddenJiraBoards.add(key)
+  }
+  persistHiddenJiraBoards()
+  console.log(`[jira-filter] board toggled key=${key} visible=${!hiddenJiraBoards.has(key)}`)
+  renderHeaderJiraBoards()
+  if (currentData) render(currentData)
+}
 
 function getDoneDays() {
   return parseInt(document.getElementById('done-days').value, 10)
@@ -2906,6 +3251,216 @@ function vibeLaneColor(laneId) {
   }
 }
 
+// ── JIRA board management ────────────────────────────────────────────────────
+
+let jiraBoards = []
+let jiraIssues = {}  // key → issue[]
+let jiraBoardsLoading = false
+let jiraSearchLoading = false
+let jiraSearchDebounce = null
+
+function openJiraBoardModal() {
+  document.getElementById('jira-modal-overlay').classList.add('visible')
+  document.getElementById('jira-modal-error').classList.remove('visible')
+  document.getElementById('jira-search-input').value = ''
+  document.getElementById('jira-search-results').innerHTML = ''
+  renderJiraBoardList()
+  document.getElementById('jira-search-input').focus()
+}
+
+function closeJiraBoardModal() {
+  document.getElementById('jira-modal-overlay').classList.remove('visible')
+  document.getElementById('jira-modal-error').classList.remove('visible')
+}
+
+function maybeCloseJiraModal(event) {
+  if (event.target === document.getElementById('jira-modal-overlay')) {
+    closeJiraBoardModal()
+  }
+}
+
+async function loadJiraBoards() {
+  jiraBoardsLoading = true
+  try {
+    const res = await fetch('/api/jira/boards')
+    const json = await res.json()
+    if (res.status === 503) {
+      jiraBoards = []
+      return // JIRA not configured — silently skip
+    }
+    if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`)
+    jiraBoards = Array.isArray(json?.boards) ? json.boards : []
+    renderHeaderJiraBoards()
+  } catch (error) {
+    console.warn('[jira-boards] load failed:', error.message)
+    jiraBoards = []
+    renderHeaderJiraBoards()
+  } finally {
+    jiraBoardsLoading = false
+  }
+}
+
+function renderHeaderJiraBoards() {
+  const container = document.getElementById('header-jira-boards')
+  if (!container) return
+  if (!jiraBoards.length) {
+    container.innerHTML = ''
+    return
+  }
+  container.innerHTML = jiraBoards.map(board => {
+    const isHidden = hiddenJiraBoards.has(board.key)
+    return `
+    <div class="jira-board-chip${isHidden ? ' jira-board-hidden' : ''}" data-board-key="${esc(board.key)}">
+      <button class="board-toggle" type="button" onclick="toggleJiraBoardVisibility('${esc(board.key)}')" title="${isHidden ? 'Show' : 'Hide'} board">${esc(board.key)}</button>
+      <button class="unlink" type="button" onclick="unlinkJiraBoard('${esc(board.key)}')" title="Unlink">✕</button>
+    </div>
+  `
+  }).join('')
+}
+
+function renderJiraBoardList() {
+  const container = document.getElementById('jira-board-list')
+  const section = document.getElementById('jira-linked-section')
+  if (!container || !section) return
+
+  if (!jiraBoards.length) {
+    section.style.display = 'none'
+    container.innerHTML = ''
+    return
+  }
+
+  section.style.display = 'flex'
+  container.innerHTML = jiraBoards.map(board => {
+    const isHidden = hiddenJiraBoards.has(board.key)
+    return `
+    <div class="jira-board-chip${isHidden ? ' jira-board-hidden' : ''}" data-board-key="${esc(board.key)}">
+      <button class="board-toggle" type="button" onclick="toggleJiraBoardVisibility('${esc(board.key)}')" title="${isHidden ? 'Show' : 'Hide'} board">${esc(board.key)} — ${esc(board.name)}</button>
+      <button class="unlink" type="button" onclick="unlinkJiraBoard('${esc(board.key)}')" title="Unlink">✕</button>
+    </div>
+  `
+  }).join('')
+}
+
+async function runJiraSearch() {
+  const input = document.getElementById('jira-search-input')
+  const query = input.value.trim()
+  const resultsEl = document.getElementById('jira-search-results')
+  const errorEl = document.getElementById('jira-modal-error')
+
+  errorEl.classList.remove('visible')
+
+  if (!query) {
+    resultsEl.innerHTML = '<div class="jira-search-empty">Type a project name or key to search</div>'
+    return
+  }
+
+  jiraSearchLoading = true
+  resultsEl.innerHTML = '<div class="jira-search-empty">Searching…</div>'
+
+  try {
+    const res = await fetch(`/api/jira/projects?q=${encodeURIComponent(query)}`)
+    const json = await res.json()
+    if (!res.ok) throw new Error(json?.error || `Search failed (${res.status})`)
+
+    const projects = Array.isArray(json?.projects) ? json.projects : []
+    if (!projects.length) {
+      resultsEl.innerHTML = '<div class="jira-search-empty">No projects found</div>'
+      return
+    }
+
+    resultsEl.innerHTML = projects.map(p => `
+      <div class="jira-search-item" onclick="linkJiraBoard('${esc(p.key)}', '${esc(p.name)}', ${p.id ?? 'null'})">
+        <span class="jira-search-item-key">${esc(p.key)}</span>
+        <span class="jira-search-item-name">${esc(p.name)}</span>
+        <span style="font-size:10px;color:var(--muted)">Link</span>
+      </div>
+    `).join('')
+  } catch (error) {
+    errorEl.textContent = error.message || 'Search failed, try again'
+    errorEl.classList.add('visible')
+    resultsEl.innerHTML = ''
+  } finally {
+    jiraSearchLoading = false
+  }
+}
+
+// Debounced search on input
+const jiraSearchInputEl = document.getElementById('jira-search-input')
+if (jiraSearchInputEl) {
+  jiraSearchInputEl.addEventListener('input', () => {
+    clearTimeout(jiraSearchDebounce)
+    jiraSearchDebounce = setTimeout(runJiraSearch, 300)
+  })
+  jiraSearchInputEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      clearTimeout(jiraSearchDebounce)
+      runJiraSearch()
+    }
+  })
+}
+
+async function linkJiraBoard(key, name, boardId) {
+  const errorEl = document.getElementById('jira-modal-error')
+  errorEl.classList.remove('visible')
+
+  try {
+    const res = await fetch('/api/jira/boards', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, name, boardId: boardId ?? null })
+    })
+    const json = await res.json()
+    if (!res.ok) throw new Error(json?.error || `Link failed (${res.status})`)
+
+    await loadJiraBoards()
+    renderJiraBoardList()
+    closeJiraBoardModal()
+  } catch (error) {
+    errorEl.textContent = error.message || 'Failed to link board'
+    errorEl.classList.add('visible')
+  }
+}
+
+async function unlinkJiraBoard(key) {
+  const errorEl = document.getElementById('jira-modal-error')
+  errorEl.classList.remove('visible')
+
+  try {
+    const res = await fetch(`/api/jira/boards/${encodeURIComponent(key)}`, { method: 'DELETE' })
+    const json = await res.json()
+    if (!res.ok) throw new Error(json?.error || `Unlink failed (${res.status})`)
+
+    await loadJiraBoards()
+    renderJiraBoardList()
+  } catch (error) {
+    errorEl.textContent = error.message || 'Failed to unlink board'
+    errorEl.classList.add('visible')
+  }
+}
+
+async function fetchJiraIssues(key) {
+  try {
+    const res = await fetch(`/api/jira/boards/${encodeURIComponent(key)}/issues`)
+    const json = await res.json()
+    if (res.status === 503) {
+      jiraIssues[key] = []  // JIRA not configured
+      return
+    }
+    if (res.status === 404) {
+      jiraIssues[key] = []  // board unlinked
+      return
+    }
+    if (!res.ok) {
+      console.warn(`[jira-issues] fetch failed key=${key}:`, json?.error || `HTTP ${res.status}`)
+      return  // stale on error
+    }
+    jiraIssues[key] = Array.isArray(json?.issues) ? json.issues : []
+  } catch (error) {
+    console.warn(`[jira-issues] fetch failed key=${key}:`, error.message)
+    // stale on error — leave existing jiraIssues[key] intact
+  }
+}
+
 async function fetchVibeCards() {
   vibeCardsLoading = true
   vibeCardsError = null
@@ -2996,10 +3551,15 @@ async function poll() {
   try {
     const [instancesRes] = await Promise.all([
       fetch(API),
-      fetchVibeCards()
+      fetchVibeCards(),
+      loadJiraBoards()
     ])
     const json = await instancesRes.json()
     currentData = json
+    // Fetch JIRA issues for linked boards in parallel
+    if (jiraBoards.length > 0) {
+      await Promise.allSettled(jiraBoards.map(b => fetchJiraIssues(b.key)))
+    }
     render(json)
     document.getElementById('status-dot').className = 'status-dot'
     document.getElementById('last-updated').textContent =
@@ -3173,7 +3733,14 @@ function renderBoard(milestones, instances, quickTasks) {
           return !claimedQuickTaskKeys.has(`::${String(qt.id)}`)
         })
       : []
-    const totalCount = cards.length + phaseQuickTasks.length + vibePhaseCards.length
+
+    // JIRA issues for this phase (computed early for count accuracy)
+    const phaseJiraIssues = Object.entries(jiraIssues)
+      .filter(([k]) => !hiddenJiraBoards.has(k))
+      .flatMap(([, issues]) => issues)
+      .filter(issue => jiraStatusToPhase(issue.status) === phase)
+
+    const totalCount = cards.length + phaseQuickTasks.length + vibePhaseCards.length + phaseJiraIssues.length
 
     const col = document.createElement('div')
     col.className = 'phase-column'
@@ -3252,6 +3819,11 @@ function renderBoard(milestones, instances, quickTasks) {
             ?? [...quickTaskByInstAndId.values()].reduce((found, m) => found ?? m.get(linkedId) ?? null, null))
         : null
       colEl.appendChild(makeVibeCard(vibeCard, linkedQt))
+    }
+
+    // JIRA cards for this phase
+    for (const issue of (jiraBoards.length > 0 ? phaseJiraIssues : [])) {
+      colEl.appendChild(makeJiraCard(issue))
     }
 
     for (const m of cards) {
@@ -3347,6 +3919,33 @@ function makeVibeCard(cardData, linkedQt = null) {
     card.classList.remove('dragging')
   })
 
+  return card
+}
+
+function makeJiraCard(issue) {
+  const card = document.createElement('div')
+  card.className = 'card jira-card'
+
+  const key = issue?.key ?? ''
+  const summary = issue?.summary ?? ''
+  const type = issue?.type ?? ''
+  const priority = issue?.priority ?? ''
+  const assignee = issue?.assignee ?? null
+  const typeIcon = jiraTypeIcon(type)
+  const priorityColor = jiraPriorityColor(priority)
+
+  card.innerHTML = `
+    <div class="jira-card-header">
+      <span class="jira-badge">JIRA</span>
+      <span class="jira-key">${esc(key)}</span>
+    </div>
+    <div class="jira-summary">${esc(summary)}</div>
+    <div class="jira-meta">
+      <span class="jira-type-icon" title="${esc(type)}">${typeIcon}</span>
+      <span class="jira-priority-dot" style="background:${esc(priorityColor)}" title="${esc(priority)}"></span>
+      <span class="jira-assignee">${esc(assignee ?? '—')}</span>
+    </div>
+  `
   return card
 }
 

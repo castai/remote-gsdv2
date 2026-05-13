@@ -6,6 +6,7 @@ auth.json
 .bg-shell/
 node_modules/
 secrets/
+jira-config.json
 
 # ── GSD baseline (auto-generated) ──
 .gsd-id
