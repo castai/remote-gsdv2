@@ -834,6 +834,42 @@ app.post('/api/terminal/:name/session', (req, res) => {
   }
 })
 
+/**
+ * POST /api/terminal/:name/mouse
+ * Body: { enabled: boolean, session?: string }
+ * Toggles tmux mouse mode on the target instance. Pod instances run the
+ * command via kubectl exec; local instances run tmux directly.
+ */
+app.post('/api/terminal/:name/mouse', (req, res) => {
+  const cfg = instanceConfigs.find(i => i.name === req.params.name)
+  if (!cfg) return res.status(404).json({ error: 'instance not found' })
+  const enabled = req.body?.enabled === true
+  const targetSession = req.body?.session
+  if (targetSession && !/^[\w\-]+$/.test(targetSession)) {
+    return res.status(400).json({ error: 'invalid session name' })
+  }
+  const flag = enabled ? 'on' : 'off'
+  try {
+    // `set -g mouse <on|off>` toggles globally. If a session is specified,
+    // we scope to that session with -t for predictability.
+    const tmuxArgs = targetSession
+      ? ['set', '-t', targetSession, '-g', 'mouse', flag]
+      : ['set', '-g', 'mouse', flag]
+    if (cfg.pod) {
+      const ns  = cfg.namespace ?? 'lk-gsd', ctr = cfg.container ?? 'gsd'
+      execFileSync(KUBECTL, ['exec', cfg.pod, '-n', ns, '-c', ctr, '--', 'tmux', ...tmuxArgs],
+        { encoding: 'utf8', timeout: 5000 })
+    } else {
+      execFileSync('tmux', tmuxArgs, { encoding: 'utf8', timeout: 5000 })
+    }
+    console.log(`[terminal] mouse=${flag} for ${cfg.name}${targetSession ? '/' + targetSession : ''}`)
+    res.json({ ok: true, mouse: flag })
+  } catch (err) {
+    console.warn(`[terminal] mouse toggle failed for ${cfg.name}: ${err.message}`)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 // ─── ttyd reverse proxy ───────────────────────────────────────────────────────
 // Same-origin proxy so the terminal iframe shares the dashboard's origin.
 // This is what makes auto-copy-on-selection actually work — cross-origin
@@ -903,12 +939,11 @@ app.get('/terminal-page/:name', (req, res) => {
     #bar-title{font-family:-apple-system,sans-serif;font-size:12px;color:#e2e8f0;font-weight:500}
     #bar-session{font-family:'SF Mono','Fira Code',monospace;font-size:11px;
       color:#22c55e;background:#0a2a1e;border-radius:4px;padding:1px 7px}
-    #bar-hint{font-family:-apple-system,sans-serif;font-size:10px;color:#94a3b8;
-      background:#22263a;border-radius:4px;padding:2px 7px;letter-spacing:0.02em}
     #bar-spacer{flex:1}
     .bar-btn{background:none;border:1px solid #2e3349;border-radius:4px;
       color:#64748b;font-size:11px;padding:3px 8px;cursor:pointer;transition:border-color .15s,color .15s;white-space:nowrap}
     .bar-btn:hover{border-color:#6366f1;color:#e2e8f0}
+    .bar-btn.active{border-color:#22c55e;color:#86efac;background:#0a2a1e}
     #settings-btn{font-size:13px}
     #settings-panel{display:none;position:absolute;top:40px;right:12px;
       background:#1a1d27;border:1px solid #2e3349;border-radius:8px;
@@ -934,9 +969,9 @@ app.get('/terminal-page/:name', (req, res) => {
     <span id="bar-dot"></span>
     <span id="bar-title">${cfg.name}</span>
     <span id="bar-session">${sessionName}</span>
-    <span id="bar-hint" title="tmux mouse mode is on — hold Option/Alt while dragging to select text">⌥-drag to select</span>
     <span id="bar-spacer"></span>
-    <button class="bar-btn" id="copy-btn" onclick="copyTerminalSelection()" title="Copy selection (⌥-drag to select, then auto-copies; or click here)">⌘C Copy</button>
+    <button class="bar-btn" id="mouse-toggle-btn" onclick="toggleMouseMode()" title="Toggle tmux mouse mode (off = text selection works)">Mouse: off</button>
+    <button class="bar-btn" id="copy-btn" onclick="copyTerminalSelection()" title="Copy selection (or just select with mouse — auto-copies when tmux mouse is off)">⌘C Copy</button>
     <button class="bar-btn" id="paste-btn" onclick="pasteFromClipboard()" title="Paste (Cmd+V)">⌘V Paste</button>
     <button class="bar-btn" id="settings-btn" onclick="toggleSettings(event)">⚙</button>
     <div id="settings-panel">
@@ -1169,6 +1204,62 @@ app.get('/terminal-page/:name', (req, res) => {
     function closeSettings(){document.getElementById('settings-panel').classList.remove('open')}
     document.addEventListener('click',closeSettings)
     document.getElementById('settings-panel').addEventListener('click',e=>e.stopPropagation())
+
+    // ── Tmux mouse-mode toggle ───────────────────────────────────────────────
+    // tmux's mouse-mode intercepts mouse drags, breaking text selection. We
+    // default to off (so selection just works) and let the user re-enable it
+    // when they want mouse scroll / pane resize in tmux.
+    const MOUSE_KEY = 'gsd-cp-tmux-mouse:' + INST
+    let mouseEnabled = (() => {
+      try { return localStorage.getItem(MOUSE_KEY) === 'on' } catch { return false }
+    })()
+
+    function updateMouseToggleBtn(){
+      const btn = document.getElementById('mouse-toggle-btn')
+      if (!btn) return
+      btn.textContent = 'Mouse: ' + (mouseEnabled ? 'on' : 'off')
+      btn.classList.toggle('active', mouseEnabled)
+    }
+
+    async function toggleMouseMode(){
+      const next = !mouseEnabled
+      const btn = document.getElementById('mouse-toggle-btn')
+      btn.disabled = true
+      try {
+        const res = await fetch('/api/terminal/' + encodeURIComponent(INST) + '/mouse', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: next, session: SESSION })
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data?.error || ('HTTP ' + res.status))
+        mouseEnabled = next
+        try { localStorage.setItem(MOUSE_KEY, next ? 'on' : 'off') } catch {}
+        updateMouseToggleBtn()
+        flashStatus('tmux mouse ' + (next ? 'on' : 'off'))
+      } catch (e) {
+        alert('Failed to toggle tmux mouse mode: ' + e.message)
+      } finally {
+        btn.disabled = false
+      }
+    }
+
+    // Apply the persisted mouse state on initial load — the pod tmux config
+    // defaults to off, but the user may have turned it on previously.
+    async function syncInitialMouseState(){
+      updateMouseToggleBtn()
+      if (mouseEnabled) {
+        // Force enable to match localStorage preference
+        try {
+          await fetch('/api/terminal/' + encodeURIComponent(INST) + '/mouse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: true, session: SESSION })
+          })
+        } catch {}
+      }
+    }
+    syncInitialMouseState()
 
     async function applySettings(){
       const fontSize=parseInt(document.getElementById('sp-fontsize').value)

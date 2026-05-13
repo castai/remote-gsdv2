@@ -261,7 +261,7 @@ RUN printf '%s\n' \
     'set -g default-terminal "tmux-256color"' \
     'set -ga terminal-overrides ",xterm-256color:Tc,*256col*:Tc"' \
     'set -g default-shell /bin/zsh' \
-    'set -g mouse on' \
+    'set -g mouse off' \
     'set -g history-limit 50000' \
     '' \
     '# Bracketed paste — pass through to inner apps so multi-line pastes' \
