@@ -28,7 +28,8 @@ import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { execFileSync, spawn } from 'child_process'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
-import { createServer } from 'http'
+import { createServer, request as httpRequest } from 'http'
+import { connect as netConnect } from 'net'
 import Redis from 'ioredis'
 import { readInstance } from './reader.js'
 import { deriveInstance } from './derive.js'
@@ -833,6 +834,43 @@ app.post('/api/terminal/:name/session', (req, res) => {
   }
 })
 
+// ─── ttyd reverse proxy ───────────────────────────────────────────────────────
+// Same-origin proxy so the terminal iframe shares the dashboard's origin.
+// This is what makes auto-copy-on-selection actually work — cross-origin
+// iframes (different ports) silently block contentDocument access.
+
+function isKnownTtydPort(port) {
+  for (const entry of ttydProcs.values()) {
+    if (entry.port === port) return true
+  }
+  return false
+}
+
+// HTTP proxy: /ttyd/<port>/<path> → http://127.0.0.1:<port>/<path>
+app.use('/ttyd/:port', (req, res) => {
+  const port = parseInt(req.params.port, 10)
+  if (!Number.isFinite(port) || !isKnownTtydPort(port)) {
+    return res.status(404).send('Unknown ttyd port')
+  }
+  // Express strips the matched prefix; req.url is the path after /ttyd/<port>
+  const targetPath = req.url || '/'
+  const proxyReq = httpRequest({
+    host: '127.0.0.1',
+    port,
+    method: req.method,
+    path: targetPath,
+    headers: { ...req.headers, host: `127.0.0.1:${port}` }
+  }, proxyRes => {
+    res.writeHead(proxyRes.statusCode || 502, proxyRes.headers)
+    proxyRes.pipe(res)
+  })
+  proxyReq.on('error', err => {
+    console.warn(`[ttyd-proxy] http error port=${port} path=${targetPath}: ${err.message}`)
+    if (!res.headersSent) res.status(502).send('ttyd upstream error')
+  })
+  req.pipe(proxyReq)
+})
+
 // ─── Full-page terminal tab ───────────────────────────────────────────────────
 
 app.get('/terminal-page/:name', (req, res) => {
@@ -937,8 +975,8 @@ app.get('/terminal-page/:name', (req, res) => {
         else{wrap.style.maxWidth='';wrap.style.margin=''}
         ttydPort=data.port
         const url=IS_LOCAL
-          ?'http://localhost:'+data.port+'/'
-          :'http://localhost:'+data.port+'/?arg='+encodeURIComponent(SESSION+':0')
+          ?'/ttyd/'+data.port+'/'
+          :'/ttyd/'+data.port+'/?arg='+encodeURIComponent(SESSION+':0')
         document.getElementById('ttyd-frame').src=url
         // Connect our own WS for paste injection
         connectPasteWs(data.port)
@@ -953,7 +991,8 @@ app.get('/terminal-page/:name', (req, res) => {
 
     function connectPasteWs(port){
       if(ttydWs){try{ttydWs.close()}catch{}}
-      const ws=new WebSocket('ws://localhost:'+port+'/ws')
+      const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const ws=new WebSocket(wsProto+'//'+location.host+'/ttyd/'+port+'/ws')
       ws.binaryType='arraybuffer'
       ws.onopen=()=>{
         // Auth handshake
@@ -1150,6 +1189,40 @@ app.get('/terminal-page/:name', (req, res) => {
 // ─── Start ────────────────────────────────────────────────────────────────────
 
 const httpServer = createServer(app)
+
+// WebSocket upgrade proxy for ttyd: /ttyd/<port>/ws → ws://127.0.0.1:<port>/ws
+httpServer.on('upgrade', (req, clientSocket, head) => {
+  const m = (req.url || '').match(/^\/ttyd\/(\d+)(\/.*)?$/)
+  if (!m) {
+    clientSocket.destroy()
+    return
+  }
+  const port = parseInt(m[1], 10)
+  const upstreamPath = m[2] || '/'
+  if (!Number.isFinite(port) || !isKnownTtydPort(port)) {
+    clientSocket.write('HTTP/1.1 404 Not Found\r\n\r\n')
+    clientSocket.destroy()
+    return
+  }
+  const upstream = netConnect(port, '127.0.0.1', () => {
+    const lines = [
+      `GET ${upstreamPath} HTTP/1.1`,
+      `Host: 127.0.0.1:${port}`,
+      ...Object.entries(req.headers).map(([k, v]) => `${k}: ${v}`),
+      '', ''
+    ]
+    upstream.write(lines.join('\r\n'))
+    if (head && head.length) upstream.write(head)
+    upstream.pipe(clientSocket)
+    clientSocket.pipe(upstream)
+  })
+  upstream.on('error', err => {
+    console.warn(`[ttyd-proxy] ws error port=${port}: ${err.message}`)
+    try { clientSocket.destroy() } catch {}
+  })
+  clientSocket.on('error', () => { try { upstream.destroy() } catch {} })
+})
+
 httpServer.listen(PORT, () => {
   console.log(`[server] Listening on http://localhost:${PORT}`)
 })
