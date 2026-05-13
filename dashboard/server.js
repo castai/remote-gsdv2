@@ -996,26 +996,120 @@ app.get('/terminal-page/:name', (req, res) => {
     }
 
     async function copyTerminalSelection(){
-      const iframe=document.getElementById('ttyd-frame')
-      try{ iframe.focus() }catch{}
-
-      let selected=''
-      try{
-        selected=iframe.contentWindow?.term?.getSelection?.() ?? ''
-      }catch{}
+      // Try cached first (auto-captured on mouseup), fall back to live selection
+      let selected = cachedSelection
+      if(!selected){
+        try{
+          selected = document.getElementById('ttyd-frame')?.contentWindow?.term?.getSelection?.() ?? ''
+        }catch{}
+      }
 
       if(!selected){
-        alert('Select text inside the terminal first, then click Copy.')
+        alert('Select text inside the terminal first, then click Copy or press Cmd+C.')
         return
       }
 
       try{
         await navigator.clipboard.writeText(selected)
+        const btn = document.getElementById('copy-btn')
+        const orig = btn.textContent
+        btn.textContent = '✓ Copied'
+        setTimeout(() => { btn.textContent = orig }, 900)
       }catch(e){
         console.warn('[copy] clipboard write failed:',e.message)
         alert('Clipboard write failed. Grant clipboard permission for this page and try again.')
       }
     }
+
+    // ── Auto-copy on selection (X11-style) ───────────────────────────────────
+    // Watch the iframe's xterm selection. When the user releases the mouse with
+    // non-empty selection, write it straight to the clipboard — no Copy button
+    // needed, no timing race with iframe focus loss.
+    let cachedSelection = ''
+    let lastWrittenSelection = ''
+
+    async function autoCopyIfNew(){
+      let sel = ''
+      try{
+        sel = document.getElementById('ttyd-frame')?.contentWindow?.term?.getSelection?.() ?? ''
+      }catch{}
+      if(!sel) return
+      cachedSelection = sel
+      if(sel === lastWrittenSelection) return
+      try{
+        await navigator.clipboard.writeText(sel)
+        lastWrittenSelection = sel
+        flashStatus('Selection copied')
+      }catch{
+        // Browser may deny clipboard write without a user gesture. The Copy
+        // button click is always a gesture, so falling back is fine.
+      }
+    }
+
+    function flashStatus(text){
+      const dot = document.getElementById('bar-dot')
+      if(!dot || dot.__flashing) return
+      dot.__flashing = true
+      const prevTitle = dot.title
+      dot.title = text
+      dot.style.background = '#facc15'
+      setTimeout(()=>{ dot.style.background='#22c55e'; dot.title=prevTitle; dot.__flashing=false }, 600)
+    }
+
+    function wireIframeSelectionCapture(){
+      const iframe = document.getElementById('ttyd-frame')
+      try{
+        const doc = iframe.contentDocument || iframe.contentWindow?.document
+        if(!doc || doc.__selectionWired) return
+        doc.__selectionWired = true
+        doc.addEventListener('mouseup', () => setTimeout(autoCopyIfNew, 30))
+        doc.addEventListener('keyup', e => {
+          // Shift+arrow selections — copy when key released
+          if(e.shiftKey) setTimeout(autoCopyIfNew, 30)
+        })
+      }catch{
+        // Cross-origin until the iframe URL becomes same-origin (localhost:ttydPort)
+        setTimeout(wireIframeSelectionCapture, 500)
+      }
+    }
+    document.getElementById('ttyd-frame').addEventListener('load', () => {
+      setTimeout(wireIframeSelectionCapture, 100)
+    })
+    // Initial attempt in case the iframe is already loaded
+    setTimeout(wireIframeSelectionCapture, 200)
+
+    // ── Image paste support ──────────────────────────────────────────────────
+    // When the clipboard contains an image (e.g. screenshot), upload it to /tmp
+    // on the server and inject [image: /tmp/path] into the terminal so the agent
+    // running inside can read it.
+    async function handleImagePaste(blob){
+      try{
+        flashStatus('Uploading image…')
+        const res = await fetch('/api/clipboard-image', {
+          method: 'POST',
+          headers: { 'Content-Type': blob.type || 'image/png' },
+          body: blob
+        })
+        const data = await res.json()
+        if(!res.ok) throw new Error(data?.error || ('HTTP ' + res.status))
+        sendPaste('[image: ' + data.path + ']')
+        flashStatus('Image pasted: ' + data.path)
+      }catch(e){
+        console.warn('[image-paste] failed:', e.message)
+        alert('Failed to save pasted image: ' + e.message)
+      }
+    }
+
+    // Outer-page paste handler: image → upload + inject reference, text → fall through
+    document.addEventListener('paste', async e => {
+      const items = Array.from(e.clipboardData?.items ?? [])
+      const imageItem = items.find(it => it.type?.startsWith('image/'))
+      if(imageItem){
+        e.preventDefault()
+        const blob = imageItem.getAsFile()
+        if(blob) await handleImagePaste(blob)
+      }
+    })
 
     // Intercept Cmd+V in the outer page and route to paste function
     document.addEventListener('keydown',e=>{
