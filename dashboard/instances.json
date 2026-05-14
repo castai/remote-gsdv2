@@ -1,7 +1,7 @@
 [
   {
     "name": "salesanalyzer",
-    "pod": "gsd-salesanalyzer-7cc96c56f8-j4j9p",
+    "podSelector": "app.kubernetes.io/instance=salesanalyzer",
     "namespace": "lk-gsd",
     "gsdPath": "/home/gsd/workspace/salesanalyzer/.gsd",
     "vscodeTunnelUrl": "https://vscode.dev/tunnel/salesanalyzer",

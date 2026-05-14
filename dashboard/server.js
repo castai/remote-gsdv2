@@ -86,6 +86,37 @@ function saveInstances() { writeFileSync(INSTANCES_FILE, JSON.stringify(instance
 const instanceConfigs = loadInstances()
 console.log(`[server] Loaded ${instanceConfigs.length} instance(s):`, instanceConfigs.map(i => i.name))
 
+// ─── Resolve live pod names from deployment selectors ─────────────────────────
+// Replaces hardcoded pod names with dynamically discovered ones.
+// Configs that have an explicit `pod` field keep that value.
+// Configs that have a `podSelector` or `deployment` field get the running pod
+// name resolved at startup via kubectl label selector.
+function resolvePodNames(configs) {
+  for (const cfg of configs) {
+    if (cfg.pod) continue // explicit pod name — use as-is
+    const selector = cfg.podSelector ?? (cfg.deployment ? `app=${cfg.deployment}` : null)
+    if (!selector) continue
+    try {
+      const ns = cfg.namespace ?? 'lk-gsd'
+      // Find the running pod matching the label selector (ignore terminating pods)
+      const out = execFileSync(KUBECTL, [
+        'get', 'pods', '-n', ns, '-l', selector,
+        '-o', 'jsonpath={.items[?(@.status.phase=="Running")].metadata.name}'
+      ], { timeout: 10000, encoding: 'utf8' })
+      const running = (out?.trim() || '').split(/\s+/).filter(Boolean)
+      if (running.length > 0) {
+        cfg.pod = running[0]
+        console.log(`[server] resolved ${cfg.name} selector=${selector} → pod=${cfg.pod}`)
+      } else {
+        console.warn(`[server] no running pod found for selector "${selector}" in ${ns}`)
+      }
+    } catch (e) {
+      console.warn(`[server] failed to resolve pod for ${cfg.name}: ${e.message}`)
+    }
+  }
+}
+resolvePodNames(instanceConfigs)
+
 // ─── Vibe Card persistence ────────────────────────────────────────────────────
 
 function isPlainObject(value) {
