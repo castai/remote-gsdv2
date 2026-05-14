@@ -156,6 +156,12 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 # LAYER 4: Language servers & dev tools (changes when adding/upgrading LSPs)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# ttyd — web terminal server (serves tmux over WebSocket on port 7681)
+# Install to /usr/local/bin so it's available system-wide as root, then
+# the image's USER gsd can execute it.
+RUN curl -fsSL https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 \
+      -o /usr/local/bin/ttyd && chmod +x /usr/local/bin/ttyd
+
 # Go tools
 RUN GOBIN=/usr/local/bin go install golang.org/x/tools/gopls@latest && \
     GOBIN=/usr/local/bin go install github.com/go-delve/delve/cmd/dlv@latest && \

@@ -132,6 +132,44 @@ else
 fi
 
 echo "[entrypoint] ✓ tmux session '${TMUX_SESSION}' is running."
+
+# ── Start ttyd (web terminal) ────────────────────────────────────────────────
+# ttyd serves the tmux session over WebSocket on port 7681.
+# The dashboard port-forwards to this port — it must be running before any
+# terminal page is opened. Restart on exit so a crash doesn't leave the
+# dashboard with a blank terminal.
+TTYD_LOG="/tmp/ttyd.log"
+TMUX_ATTACH_SCRIPT="/tmp/tmux-attach.sh"
+
+# Write the attach script (dashboard may have already created it, but be safe)
+if [ ! -f "${TMUX_ATTACH_SCRIPT}" ]; then
+  cat > "${TMUX_ATTACH_SCRIPT}" <<'EOF'
+#!/bin/bash
+SESSION="${1:-gsd}"
+exec tmux attach -t "${SESSION}" 2>/dev/null || exec tmux new-session -A -s "${SESSION}"
+EOF
+  chmod +x "${TMUX_ATTACH_SCRIPT}"
+fi
+
+start_ttyd() {
+  local bin
+  bin=$(command -v ttyd 2>/dev/null || echo "${HOME}/.local/bin/ttyd")
+  echo "[entrypoint] Starting ttyd on port 7681 (${bin})..."
+  nohup "${bin}" -p 7681 -W -a \
+    -t "fontSize=16" \
+    -t "fontFamily=Menlo, monospace" \
+    -t "allowProposedApi=true" \
+    "${TMUX_ATTACH_SCRIPT}" \
+    > "${TTYD_LOG}" 2>&1 &
+  echo "[entrypoint] ✓ ttyd started (pid $!)"
+}
+
+if pgrep -x ttyd > /dev/null 2>&1; then
+  echo "[entrypoint] ttyd already running — keeping it."
+else
+  start_ttyd
+fi
+
 echo "[entrypoint] Container will stay alive. Run 'gsd' inside the session to start the agent."
 echo ""
 
@@ -141,6 +179,10 @@ while true; do
     echo "[entrypoint] tmux session ended — restarting shell..."
     sleep 2
     tmux new-session -d -s "${TMUX_SESSION}" -c "${WORKSPACE}"
+  fi
+  if ! pgrep -x ttyd > /dev/null 2>&1; then
+    echo "[entrypoint] ttyd exited — restarting..."
+    start_ttyd
   fi
   sleep 10
 done

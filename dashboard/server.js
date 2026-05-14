@@ -64,15 +64,18 @@ if (!terminalPrefs.fontFamily) terminalPrefs.fontFamily = 'Menlo, monospace'
 if (!terminalPrefs.cols)       terminalPrefs.cols       = 0   // 0 = auto-fit
 
 // Build the ttyd command string for pod restarts (shell-quoted for bash -c)
+// Uses `command -v ttyd` to find the binary — works whether ttyd is in
+// /usr/local/bin (baked image) or ~/.local/bin (manually installed fallback).
 function buildTtydCmd() {
   const parts = [
-    'ttyd', '-p', '7681', '-W', '-a',
+    '$(command -v ttyd || echo ~/.local/bin/ttyd)', '-p', '7681', '-W', '-a',
     '-t', `fontSize=${terminalPrefs.fontSize}`,
     '-t', `fontFamily=${terminalPrefs.fontFamily}`,
     '-t', 'allowProposedApi=true',
     '/tmp/tmux-attach.sh'
   ]
-  return parts.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ')
+  // First element is a shell expression — don't quote it
+  return parts[0] + ' ' + parts.slice(1).map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ')
 }
 
 // ─── Instance config management ───────────────────────────────────────────────
