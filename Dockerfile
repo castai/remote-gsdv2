@@ -298,7 +298,9 @@ RUN printf '%s\n' \
     '# iTerm2 tmux -CC loses bracketed-paste state on reconnect and reverts' \
     '# to raw paste (each newline fires as Enter). Sending \e[?2004h on attach' \
     '# restores it without requiring a pod restart or config reload.' \
-    'set-hook -g client-attached "run-shell \"tmux send-keys -t= '"'"'\\033[?2004h'"'"'\""' \
+    '# Use #{client_session} (available in hook context) instead of -t= (current' \
+    '# client) which is unavailable inside run-shell and returns exit code 1.' \
+    'set-hook -g client-attached "run-shell '\''tmux send-keys -t #{client_session} \"\033[?2004h\" 2>/dev/null; true'\''"' \
     '' \
     '# Status bar' \
     'set -g status-style "bg=#1e1e2e,fg=#cdd6f4"' \
