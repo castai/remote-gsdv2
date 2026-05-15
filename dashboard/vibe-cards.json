@@ -102,6 +102,25 @@
       "comments": [],
       "createdAt": "2026-05-13T14:12:25.729Z",
       "updatedAt": "2026-05-13T15:04:33.211Z"
+    },
+    {
+      "id": "review-test-failures-and-do-complete-test-audit",
+      "title": "Review Test Failures and do complete test audit",
+      "description": null,
+      "status": "open",
+      "lane": "discussing",
+      "priority": "medium",
+      "tags": [],
+      "metadata": {
+        "color": "purple",
+        "instanceName": "PERSONAL-opts",
+        "sessionName": "gsd",
+        "jiraUrl": null,
+        "linkedQuickTaskId": null
+      },
+      "comments": [],
+      "createdAt": "2026-05-15T16:07:31.204Z",
+      "updatedAt": "2026-05-15T16:07:31.204Z"
     }
   ]
 }
