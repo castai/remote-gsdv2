@@ -816,6 +816,54 @@ app.post('/api/clipboard-image', express.raw({ type: 'image/*', limit: '25mb' })
   }
 })
 
+/**
+ * POST /api/file-drop?instance=<name>&filename=<name>
+ * Accepts raw file bytes and writes them to a tmp file. If the named instance
+ * is a pod, the file is also copied into the pod via `kubectl cp` and the
+ * returned path is the pod-side path so the agent running there can read it.
+ *
+ * Returns { path } with the filesystem path appropriate for the caller's
+ * instance.
+ */
+app.post('/api/file-drop', express.raw({ type: () => true, limit: '50mb' }), (req, res) => {
+  try {
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      return res.status(400).json({ error: 'empty file body' })
+    }
+    const originalName = (req.query.filename || 'dropped-file').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 200)
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19)
+    const rand = Math.random().toString(36).slice(2, 7)
+    const filename = `${stamp}-${rand}-${originalName}`
+    const localPath = `/tmp/${filename}`
+    writeFileSync(localPath, req.body)
+    console.log(`[file-drop] saved ${localPath} (${req.body.length} bytes)`)
+
+    const instanceName = req.query.instance
+    const cfg = instanceName ? instanceConfigs.find(i => i.name === instanceName) : null
+
+    // Pod instance — copy the file into the pod at /tmp/<same-filename>
+    if (cfg?.pod) {
+      const ns = cfg.namespace ?? 'lk-gsd'
+      const ctr = cfg.container ?? 'gsd'
+      const podPath = `/tmp/${filename}`
+      try {
+        execFileSync(KUBECTL, ['cp', localPath, `${ns}/${cfg.pod}:${podPath}`, '-c', ctr],
+          { encoding: 'utf8', timeout: 15000 })
+        console.log(`[file-drop] copied to pod ${cfg.pod}:${podPath}`)
+        return res.json({ path: podPath, bytes: req.body.length, instance: cfg.name, pod: true })
+      } catch (err) {
+        console.warn(`[file-drop] kubectl cp failed for ${cfg.name}: ${err.message}`)
+        // Fall through to return the local path — better than nothing
+      }
+    }
+
+    res.json({ path: localPath, bytes: req.body.length, instance: cfg?.name ?? null, pod: false })
+  } catch (err) {
+    console.error('[file-drop] save failed:', err)
+    res.status(500).json({ error: err.message || 'failed to save file' })
+  }
+})
+
 app.get('/api/terminal-prefs', (req, res) => res.json(terminalPrefs))
 
 app.post('/api/terminal-prefs', (req, res) => {
@@ -1275,6 +1323,7 @@ app.get('/terminal-page/:name', (req, res) => {
     <button class="bar-btn" id="mouse-toggle-btn" onclick="toggleMouseMode()" title="Toggle tmux mouse mode (off = text selection works)">Mouse: off</button>
     <button class="bar-btn" id="copy-btn" onclick="copyTerminalSelection()" title="Copy selection (or just select with mouse — auto-copies when tmux mouse is off)">⌘C Copy</button>
     <button class="bar-btn" id="paste-btn" onclick="pasteFromClipboard()" title="Paste (Cmd+V)">⌘V Paste</button>
+    <button class="bar-btn" id="upload-btn" onclick="document.getElementById('file-input').click()" title="Upload file to /tmp">📎</button>
     <button class="bar-btn" id="settings-btn" onclick="toggleSettings(event)">⚙</button>
     <div id="settings-panel">
       <div class="sp-title">Terminal settings</div>
@@ -1294,6 +1343,7 @@ app.get('/terminal-page/:name', (req, res) => {
   <div id="frame-wrap">
     <iframe id="ttyd-frame" src="about:blank" allow="clipboard-read; clipboard-write"></iframe>
   </div>
+  <input type="file" id="file-input" style="display:none">
   <script>
     const INST=${instJson}, SESSION=${sessionJson}, IS_LOCAL=${isLocalJson}
 
@@ -1553,6 +1603,50 @@ app.get('/terminal-page/:name', (req, res) => {
         if(blob) await handleImagePaste(blob)
       }
     })
+
+    // ── File upload support ──────────────────────────────────────────────────
+    // Click the 📎 button → file picker → upload to /tmp → inject [file: path].
+    // Also trap accidental window-level file drops so the browser doesn't navigate.
+    let fileUploadInFlight = false
+
+    async function handleFileUpload(file){
+      if(fileUploadInFlight){
+        console.debug('[file-upload] already in flight, skipping')
+        return
+      }
+      fileUploadInFlight = true
+      try{
+        flashStatus('Uploading file…')
+        const url = '/api/file-drop?instance=' + encodeURIComponent(INST) +
+                    '&filename=' + encodeURIComponent(file.name)
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': file.type || 'application/octet-stream' },
+          body: file
+        })
+        const data = await res.json()
+        if(!res.ok) throw new Error(data?.error || ('HTTP ' + res.status))
+        sendPaste('[file: ' + data.path + ']')
+        flashStatus((data.pod ? 'Pod file: ' : 'File: ') + data.path)
+      }catch(err){
+        console.warn('[file-upload] failed:', err.message)
+        alert('Failed to upload file: ' + err.message)
+      }finally{
+        setTimeout(()=>{ fileUploadInFlight = false }, 500)
+      }
+    }
+
+    document.getElementById('file-input').addEventListener('change', e => {
+      const file = e.target.files?.[0]
+      if(file){
+        handleFileUpload(file)
+        e.target.value = '' // reset so the same file can be picked again
+      }
+    })
+
+    // Prevent accidental file drops from navigating the browser away
+    window.addEventListener('dragover', e => { e.preventDefault() })
+    window.addEventListener('drop', e => { e.preventDefault() })
 
     // Intercept Cmd+, for settings (Cmd+V is handled by the paste event listeners
     // — adding a keydown handler here would cause double-fire with the native paste event).
