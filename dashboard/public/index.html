@@ -3251,7 +3251,11 @@ function getVibeLane(card) {
 }
 
 function getVibeCardsForPhase(phase) {
-  return vibeCards.filter(card => VIBE_LANE_PHASE.get(getVibeLane(card)) === phase)
+  const cards = vibeCards.filter(card => VIBE_LANE_PHASE.get(getVibeLane(card)) === phase)
+  if (phase === 'Done') {
+    return cards.filter(card => isWithinDoneWindow(card.completedAt))
+  }
+  return cards
 }
 
 function vibeLaneLabel(laneId) {

@@ -130,14 +130,15 @@ function normalizeCardTimestamps(card, nowIso) {
   return {
     ...card,
     createdAt: typeof card.createdAt === 'string' && card.createdAt ? card.createdAt : nowIso,
-    updatedAt: typeof card.updatedAt === 'string' && card.updatedAt ? card.updatedAt : nowIso
+    updatedAt: typeof card.updatedAt === 'string' && card.updatedAt ? card.updatedAt : nowIso,
+    completedAt: card.completedAt ?? null
   }
 }
 
 function validateCardShape(card, { partial = false } = {}) {
   if (!isPlainObject(card)) return 'card must be an object'
 
-  const allowedKeys = new Set(['id', 'title', 'description', 'status', 'lane', 'priority', 'tags', 'metadata', 'comments', 'createdAt', 'updatedAt'])
+  const allowedKeys = new Set(['id', 'title', 'description', 'status', 'lane', 'priority', 'tags', 'metadata', 'comments', 'createdAt', 'updatedAt', 'completedAt'])
   for (const key of Object.keys(card)) {
     if (!allowedKeys.has(key)) return `unexpected field '${key}'`
   }
@@ -157,6 +158,7 @@ function validateCardShape(card, { partial = false } = {}) {
   if ('priority' in card && card.priority !== null && typeof card.priority !== 'string') return 'priority must be a string or null'
   if ('createdAt' in card && (typeof card.createdAt !== 'string' || !card.createdAt)) return 'createdAt must be a non-empty string'
   if ('updatedAt' in card && (typeof card.updatedAt !== 'string' || !card.updatedAt)) return 'updatedAt must be a non-empty string'
+  if ('completedAt' in card && card.completedAt !== null && (typeof card.completedAt !== 'string' || !card.completedAt)) return 'completedAt must be a non-empty string or null'
 
   if ('tags' in card) {
     if (!Array.isArray(card.tags) || !card.tags.every(tag => typeof tag === 'string')) {
@@ -199,7 +201,8 @@ function validateVibeCardsPayload(payload) {
       metadata: card.metadata ?? {},
       comments: Array.isArray(card.comments) ? card.comments : [],
       createdAt: card.createdAt,
-      updatedAt: card.updatedAt
+      updatedAt: card.updatedAt,
+      completedAt: card.completedAt
     })
   }
 
@@ -253,7 +256,8 @@ function serializeCard(card) {
     metadata: card.metadata,
     comments: Array.isArray(card.comments) ? card.comments : [],
     createdAt: card.createdAt,
-    updatedAt: card.updatedAt
+    updatedAt: card.updatedAt,
+    completedAt: card.completedAt ?? null
   }
 }
 
@@ -274,7 +278,8 @@ function buildCardFromCreate(body) {
     metadata: body.metadata ?? {},
     comments: [],
     createdAt: body.createdAt ?? nowIso,
-    updatedAt: body.updatedAt ?? nowIso
+    updatedAt: body.updatedAt ?? nowIso,
+    completedAt: body.completedAt ?? (body.lane === 'done' ? nowIso : null)
   }, nowIso)
 
   return { card: serializeCard(normalized) }
@@ -298,7 +303,14 @@ function applyCardPatch(existingCard, patch) {
     tags: Object.prototype.hasOwnProperty.call(patch, 'tags') ? patch.tags : existingCard.tags,
     metadata: Object.prototype.hasOwnProperty.call(patch, 'metadata') ? patch.metadata : existingCard.metadata,
     comments: existingCard.comments ?? [],
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
+    completedAt: Object.prototype.hasOwnProperty.call(patch, 'completedAt')
+      ? patch.completedAt
+      : (patch.lane === 'done' && existingCard.lane !== 'done'
+          ? new Date().toISOString()
+          : (patch.lane !== undefined && patch.lane !== 'done' && existingCard.lane === 'done'
+              ? null
+              : existingCard.completedAt))
   })
 
   return { card: nextCard }

@@ -25,7 +25,8 @@
         }
       ],
       "createdAt": "2026-05-12T18:24:33.207Z",
-      "updatedAt": "2026-05-12T19:28:30.448Z"
+      "updatedAt": "2026-05-12T19:28:30.448Z",
+      "completedAt": null
     },
     {
       "id": "celery-cron-fixes-to-complete-migration",
@@ -44,7 +45,8 @@
       },
       "comments": [],
       "createdAt": "2026-05-12T19:45:31.788Z",
-      "updatedAt": "2026-05-12T20:02:25.856Z"
+      "updatedAt": "2026-05-12T20:02:25.856Z",
+      "completedAt": null
     },
     {
       "id": "additional-fixes-for-celery-openclaw-jobs",
@@ -63,7 +65,8 @@
       },
       "comments": [],
       "createdAt": "2026-05-12T20:23:12.605Z",
-      "updatedAt": "2026-05-12T20:31:21.267Z"
+      "updatedAt": "2026-05-12T20:31:21.267Z",
+      "completedAt": null
     },
     {
       "id": "troubleshoot-intent-signal-delivery-failure",
@@ -82,7 +85,8 @@
       },
       "comments": [],
       "createdAt": "2026-05-12T20:50:41.913Z",
-      "updatedAt": "2026-05-12T20:58:36.583Z"
+      "updatedAt": "2026-05-12T20:58:36.583Z",
+      "completedAt": null
     },
     {
       "id": "implement-copy-from-pod-image-support",
@@ -101,7 +105,8 @@
       },
       "comments": [],
       "createdAt": "2026-05-13T14:12:25.729Z",
-      "updatedAt": "2026-05-13T15:04:33.211Z"
+      "updatedAt": "2026-05-13T15:04:33.211Z",
+      "completedAt": null
     },
     {
       "id": "review-test-failures-and-do-complete-test-audit",
@@ -120,7 +125,8 @@
       },
       "comments": [],
       "createdAt": "2026-05-15T16:07:31.204Z",
-      "updatedAt": "2026-05-16T01:29:50.844Z"
+      "updatedAt": "2026-05-16T01:29:50.844Z",
+      "completedAt": null
     }
   ]
 }
