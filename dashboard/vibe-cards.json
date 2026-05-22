@@ -108,19 +108,19 @@
       "title": "Review Test Failures and do complete test audit",
       "description": null,
       "status": "open",
-      "lane": "discussing",
+      "lane": "done",
       "priority": "medium",
       "tags": [],
       "metadata": {
         "color": "purple",
-        "instanceName": "PERSONAL-opts",
-        "sessionName": "gsd",
+        "instanceName": "salesanalyzer",
+        "sessionName": "GSDAuto",
         "jiraUrl": null,
-        "linkedQuickTaskId": null
+        "linkedQuickTaskId": 64
       },
       "comments": [],
       "createdAt": "2026-05-15T16:07:31.204Z",
-      "updatedAt": "2026-05-15T16:07:31.204Z"
+      "updatedAt": "2026-05-16T01:29:50.844Z"
     }
   ]
 }
