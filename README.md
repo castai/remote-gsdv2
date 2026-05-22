@@ -296,7 +296,7 @@ kubectl cp ~/.gsd/agent/agents/ lk-gsd/"${POD}":/home/gsd/.gsd/agent/agents/
 | Category | Tools |
 |----------|-------|
 | **Languages** | Node 22, Go 1.24, Rust stable, Python 3 |
-| **AI Agent** | GSD v2 (gsd-pi 2.77.0) |
+| **AI Agent** | GSD v2 (gsd-pi 3.0.0) |
 | **Cloud CLIs** | gcloud (+ GKE auth plugin), aws, kubectl, helm, terraform, docker, gh |
 | **Language Servers** | gopls, typescript-language-server, pyright, ruff-lsp, yaml-language-server, bash-language-server, dockerfile-language-server, tailwindcss-language-server, vscode-langservers-extracted |
 | **Go tools** | dlv, goimports, golangci-lint, gofumpt |
