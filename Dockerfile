@@ -40,7 +40,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     python3-venv \
     python3-dev \
-    # Networking & debugging
+    # Networking, debugging & browser handoff
     curl \
     wget \
     httpie \
@@ -51,6 +51,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iputils-ping \
     netcat-openbsd \
     socat \
+    xdg-utils \
     # TLS & certs
     ca-certificates \
     openssl \
