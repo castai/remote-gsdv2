@@ -80,7 +80,20 @@ else
     || echo "[entrypoint] WARN: @opengsd/gsd-pi install failed (pod can still run)"
 fi
 
+# Expose PVC-local GSD binaries through ~/.local/bin as well. Some kubectl exec
+# and non-interactive shells reset PATH to include ~/.local/bin but not npm's
+# custom prefix, so these symlinks make the CLI available consistently.
+for bin_name in gsd gsd-cli gsd-pi; do
+  if [ -e "${NPM_BIN}/${bin_name}" ]; then
+    ln -sfn "${NPM_BIN}/${bin_name}" "${HOME}/.local/bin/${bin_name}" 2>/dev/null || true
+  fi
+done
+
 # Verify gsd command is now available
+if [[ ":${PATH}:" != *":${HOME}/.local/bin:"* ]]; then
+  export PATH="${HOME}/.local/bin:${PATH}"
+fi
+
 gsd_version_output=""
 if command -v gsd &>/dev/null; then
   gsd_version_output=$(gsd --version 2>&1 || echo "")
