@@ -41,6 +41,10 @@ spec:
               # ── Seed home directory PVC from image skeleton on first boot ──
               # The PVC mounts over /home/gsd, hiding image contents.
               # /home/gsd.skel (baked into the image) has the full home dir snapshot.
+              #
+              # Note: @opengsd/gsd-pi and Kimchi harness are installed at runtime
+              # by the entrypoint into /home/gsd/.npm-global and /home/gsd/.local/bin.
+              # These paths survive restarts and can be updated in-pod without image rebuilds.
               SENTINEL="/home/gsd/.home-initialized"
               if [ ! -f "${SENTINEL}" ]; then
                 echo "[init] First boot — seeding /home/gsd from image skeleton..."

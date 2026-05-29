@@ -64,6 +64,18 @@ resources:
     memory: 64Gi
 
 # ─── Storage ─────────────────────────────────────────────────────────────────
+#
+# The PVC at /home/gsd holds:
+#   - .gsd/              GSD agent state, models, skills, auth
+#   - .npm-global/       @opengsd/gsd-pi and other npm tools (PVC-local, runtime-installed)
+#   - .local/bin/        Kimchi harness (PVC-local, runtime-installed)
+#   - workspace/         cloned repo + project .env
+#
+# Both @opengsd/gsd-pi and Kimchi harness are installed by the entrypoint
+# into these PVC-backed directories on first boot if missing. They persist
+# across pod restarts and can be updated in-pod without rebuilding the image:
+#   npm install -g @opengsd/gsd-pi@latest
+#   curl -fsSL https://github.com/getkimchi/kimchi/releases/latest/download/install.sh | bash
 
 persistence:
   size: 50Gi

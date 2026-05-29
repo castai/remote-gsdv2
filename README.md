@@ -296,7 +296,7 @@ kubectl cp ~/.gsd/agent/agents/ lk-gsd/"${POD}":/home/gsd/.gsd/agent/agents/
 | Category | Tools |
 |----------|-------|
 | **Languages** | Node 22, Go 1.24, Rust stable, Python 3 |
-| **AI Agent** | GSD v2 (gsd-pi 3.0.0) |
+| **AI Agent** | OpenGSD GSD Pi (`@opengsd/gsd-pi@latest`, installed into `/home/gsd/.npm-global` on first boot — see [PVC-Local Tools](#pvc-local-tools)) |
 | **Cloud CLIs** | gcloud (+ GKE auth plugin), aws, kubectl, helm, terraform, docker, gh |
 | **Language Servers** | gopls, typescript-language-server, pyright, ruff-lsp, yaml-language-server, bash-language-server, dockerfile-language-server, tailwindcss-language-server, vscode-langservers-extracted |
 | **Go tools** | dlv, goimports, golangci-lint, gofumpt |
@@ -307,6 +307,40 @@ kubectl cp ~/.gsd/agent/agents/ lk-gsd/"${POD}":/home/gsd/.gsd/agent/agents/
 | **Editors** | vim, nano |
 | **VS Code** | `vscode-tunnel` command (tunnel to pod from VS Code or browser) |
 
+## PVC-Local Tools
+
+**GSD Pi and the Kimchi harness are installed at runtime into the PVC-backed `/home/gsd`, not baked into image layers.**
+
+This means:
+
+- **`@opengsd/gsd-pi@latest`** is installed by the entrypoint into `/home/gsd/.npm-global` on first boot if missing. It persists across pod restarts.
+- **Kimchi harness** is installed into `/home/gsd/.local/bin` on first boot if missing.
+- The entrypoint installs both tools only when the sentinel files/directories are absent, so subsequent restarts are fast.
+- The PVC-local bin directory (`/home/gsd/.npm-global/bin`) **precedes** global image paths in `PATH`, so PVC-local updates always win.
+
+### Manual In-Pod Update
+
+To update either tool without a pod restart or image rebuild:
+
+```bash
+# Inside the pod (attach via ./connect.sh first)
+
+# Update GSD Pi to the latest version
+npm install -g @opengsd/gsd-pi@latest
+
+# Or install a specific version
+npm install -g @opengsd/gsd-pi@3.2.0
+
+# Update Kimchi harness
+curl -fsSL https://github.com/getkimchi/kimchi/releases/latest/download/install.sh | bash
+
+# Verify
+gsd --version
+kimchi --version
+```
+
+The `@opengsd/gsd-pi@latest` targeting in the entrypoint means **the next pod restart will also pick up `latest`** if the tool is removed, but manual `npm install -g` updates take effect immediately and survive restarts.
+
 ## Docker Image Layers
 
 The Dockerfile uses 7 layers ordered by change frequency (rarest first):
@@ -316,7 +350,7 @@ Layer 1: System packages (apt)          ← changes rarely
 Layer 2: Cloud CLIs (kubectl, gcloud…)  ← changes on CLI upgrades
 Layer 3: Languages (Go, Rust)           ← changes on version bumps
 Layer 4: Language servers & dev tools   ← changes on LSP upgrades
-Layer 5: GSD + Python tools             ← changes on gsd-pi upgrades
+Layer 5: npm + Python tools             ← npm prefix config only; GSD Pi is runtime-installed
 Layer 6: User, dotfiles, VS Code CLI    ← changes on config tweaks
        + skeleton snapshot (cp -a /home/gsd → /home/gsd.skel)
 Layer 7: entrypoint.sh, scripts         ← changes often, rebuilds in seconds

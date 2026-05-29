@@ -28,6 +28,93 @@ echo "  Attach:  kubectl exec -it <pod> -- tmux attach -t gsd"
 echo "  Detach:  Ctrl+B, D"
 echo "═══════════════════════════════════════════════════════════════"
 
+# ── Bootstrap: PVC-local OpenGSD GSD Pi and Kimchi harness ──────────────────
+# These tools are installed into /home/gsd (PVC-backed) so they survive pod
+# restarts and can be updated without rebuilding the image.
+#
+# Old shadowing cleanup: removes unscoped legacy npm packages (`gsd-pi` or
+# `gsd`) that could shadow the new @opengsd/gsd-pi under the PVC npm prefix.
+
+# Ensure PVC-local npm prefix and PATH are set for this script
+export NPM_CONFIG_PREFIX="${HOME}/.npm-global"
+export npm_config_prefix="${HOME}/.npm-global"
+NPM_BIN="${HOME}/.npm-global/bin"
+mkdir -p "${NPM_BIN}" "${HOME}/.npm-global/lib/node_modules" "${HOME}/.local/bin"
+
+# Prefer PVC-local binaries over image-wide ones
+if [[ ":${PATH}:" != *":${NPM_BIN}:"* ]]; then
+  export PATH="${NPM_BIN}:${PATH}"
+fi
+
+GSD_PI_INSTALLED=false
+KIMCHI_INSTALLED=false
+
+# ── Cleanup: Remove old package shadowing ───────────────────────────────────
+# Remove old unscoped packages from the PVC npm prefix. The legacy image-level
+# install is gone from the Dockerfile; PVC-local cleanup avoids stale binaries
+# when reusing an existing volume.
+export NODE_PATH="${HOME}/.npm-global/lib/node_modules"
+for old_pkg in gsd-pi gsd; do
+  if [ -d "${HOME}/.npm-global/lib/node_modules/${old_pkg}" ]; then
+    echo "[entrypoint] Removing deprecated unscoped package '${old_pkg}' from PVC npm prefix..."
+    npm uninstall -g "${old_pkg}" 2>/dev/null && echo "[entrypoint] ✓ Removed deprecated ${old_pkg} shadow" \
+      || rm -rf "${HOME}/.npm-global/lib/node_modules/${old_pkg}" "${NPM_BIN}/${old_pkg}" "${NPM_BIN}/gsd" 2>/dev/null \
+      || echo "[entrypoint] WARN: Could not remove deprecated ${old_pkg} shadow (continuing)"
+  fi
+done
+
+# ── Bootstrap: Install @opengsd/gsd-pi@latest if missing ────────────────────
+# Check for 'gsd' CLI in PVC-local npm bin (installed by @opengsd/gsd-pi)
+if command -v gsd &>/dev/null && [ -d "${HOME}/.npm-global/lib/node_modules/@opengsd/gsd-pi" ]; then
+  GSD_PI_INSTALLED=true
+  GSD_PI_VERSION=$(npm list -g @opengsd/gsd-pi --depth=0 2>/dev/null | grep -oP '@opengsd/gsd-pi@\K[^\s]+' || echo "unknown")
+  echo "[entrypoint] ✓ @opengsd/gsd-pi@${GSD_PI_VERSION} found in ${NPM_BIN} (PVC-local, up-to-date)"
+elif [ -f "${NPM_BIN}/gsd" ]; then
+  # Binary exists but module dir is missing/mangled — reinstall
+  echo "[entrypoint] gsd binary found but @opengsd/gsd-pi module missing — reinstalling..."
+  npm install -g "@opengsd/gsd-pi@latest" 2>&1 && GSD_PI_INSTALLED=true \
+    || echo "[entrypoint] WARN: @opengsd/gsd-pi install failed (pod can still run)"
+else
+  echo "[entrypoint] @opengsd/gsd-pi not found — installing @opengsd/gsd-pi@latest into ${NPM_BIN}..."
+  npm install -g "@opengsd/gsd-pi@latest" 2>&1 && GSD_PI_INSTALLED=true \
+    || echo "[entrypoint] WARN: @opengsd/gsd-pi install failed (pod can still run)"
+fi
+
+# Verify gsd command is now available
+gsd_version_output=""
+if command -v gsd &>/dev/null; then
+  gsd_version_output=$(gsd --version 2>&1 || echo "")
+  echo "[entrypoint] ✓ gsd CLI available: ${gsd_version_output:-(version check unavailable)}"
+else
+  echo "[entrypoint] WARN: gsd CLI not in PATH after bootstrap — check npm prefix configuration"
+fi
+
+# ── Bootstrap: Install Kimchi harness if missing ────────────────────────────
+# Kimchi harness is installed to ~/.local/bin/kimchi (via install.sh script)
+KIMCHI_BIN="${HOME}/.local/bin/kimchi"
+if command -v kimchi &>/dev/null; then
+  KIMCHI_INSTALLED=true
+  echo "[entrypoint] ✓ Kimchi harness found at $(command -v kimchi)"
+elif [ -f "${KIMCHI_BIN}" ]; then
+  KIMCHI_INSTALLED=true
+  export PATH="${HOME}/.local/bin:${PATH}"
+  echo "[entrypoint] ✓ Kimchi harness found at ${KIMCHI_BIN} (added to PATH)"
+else
+  echo "[entrypoint] Kimchi harness not found — installing via official installer..."
+  echo "[entrypoint]   URL: https://github.com/getkimchi/kimchi/releases/latest/download/install.sh"
+  if curl -fsSL "https://github.com/getkimchi/kimchi/releases/latest/download/install.sh" | bash 2>&1; then
+    KIMCHI_INSTALLED=true
+    export PATH="${HOME}/.local/bin:${PATH}"
+    echo "[entrypoint] ✓ Kimchi harness installed successfully"
+  else
+    echo "[entrypoint] WARN: Kimchi harness install failed (pod can still run)"
+    echo "[entrypoint]   To retry manually: curl -fsSL https://github.com/getkimchi/kimchi/releases/latest/download/install.sh | bash"
+  fi
+fi
+
+# ── Bootstrap summary ───────────────────────────────────────────────────────
+echo "[entrypoint] Bootstrap complete: gsd-pi=${GSD_PI_INSTALLED}, kimchi=${KIMCHI_INSTALLED}"
+
 # ── Git config ───────────────────────────────────────────────────────────────
 # These write to ~/.gitconfig on the PVC — persists across restarts.
 git config --global --get user.email >/dev/null 2>&1 || \

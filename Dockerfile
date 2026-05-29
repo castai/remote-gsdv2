@@ -185,10 +185,19 @@ RUN npm install -g \
     pyright
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# LAYER 5: GSD + Python tools (changes when upgrading gsd-pi or Python deps)
+# LAYER 5: GSD + Python tools
+# NOTE: gsd-pi and kimchi harness are now installed at runtime via entrypoint.sh
+# into the PVC-backed /home/gsd directory. This allows updates without rebuilding
+# the image. The PVC-local bin directory precedes global paths in PATH.
+#
+# Target package: @opengsd/gsd-pi@latest (installed on first startup if missing)
+# PVC install prefix: /home/gsd/.npm-global
 # ═══════════════════════════════════════════════════════════════════════════════
 
-RUN npm install -g gsd-pi@3.0.0
+# Configure npm to prefer a PVC-local prefix. The entrypoint creates this
+# directory on the mounted PVC and installs @opengsd/gsd-pi@latest there if missing.
+ENV PATH="/home/gsd/.npm-global/bin:${PATH}"
+ENV NPM_CONFIG_PREFIX="/home/gsd/.npm-global"
 
 RUN pip3 install --break-system-packages --no-cache-dir \
     pipx \
@@ -215,7 +224,8 @@ RUN usermod -l gsd node && \
     groupmod -n gsd node && \
     usermod -d /home/gsd -m gsd && \
     mkdir -p /home/gsd/.gsd/agent /home/gsd/go \
-             /home/gsd/.ssh /home/gsd/.vscode-server /home/gsd/workspace && \
+             /home/gsd/.ssh /home/gsd/.vscode-server /home/gsd/workspace \
+             /home/gsd/.npm-global/bin /home/gsd/.npm-global/lib/node_modules && \
     chown -R gsd:gsd /home/gsd && \
     chmod 700 /home/gsd/.ssh && \
     echo "gsd ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/gsd && \
@@ -230,7 +240,7 @@ ENV TERM=xterm-256color
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 ENV GOPATH=/home/gsd/go
-ENV PATH="/usr/local/go/bin:/home/gsd/go/bin:/home/gsd/.cargo/bin:/home/gsd/.local/bin:/usr/local/bin:${PATH}"
+ENV PATH="/home/gsd/.npm-global/bin:/usr/local/go/bin:/home/gsd/go/bin:/home/gsd/.cargo/bin:/home/gsd/.local/bin:/usr/local/bin:${PATH}"
 
 # Pre-install VS Code CLI (code-server bootstraps extensions on first connect)
 RUN mkdir -p /home/gsd/.local/bin && \
@@ -252,7 +262,7 @@ RUN sed -i 's/^ZSH_THEME=.*/ZSH_THEME="robbyrussell"/' ~/.zshrc && \
     echo '' >> ~/.zshrc && \
     echo '# GSD Remote Agent' >> ~/.zshrc && \
     echo 'export GOPATH="$HOME/go"' >> ~/.zshrc && \
-    echo 'export PATH="/usr/local/go/bin:$GOPATH/bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH"' >> ~/.zshrc && \
+    echo 'export PATH="$HOME/.npm-global/bin:/usr/local/go/bin:$GOPATH/bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH"' >> ~/.zshrc && \
     echo 'export WORKSPACE="${WORKSPACE:-/home/gsd/workspace}"' >> ~/.zshrc && \
     echo '[ -d "$WORKSPACE" ] && cd "$WORKSPACE"' >> ~/.zshrc && \
     echo '' >> ~/.zshrc && \
